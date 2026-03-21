@@ -1,75 +1,40 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Head from 'next/head';
 import toast from 'react-hot-toast';
 import WalletConnect from '@/components/WalletConnect';
 import PaymentModal from '@/components/PaymentModal';
 import RiskReport from '@/components/RiskReport';
-import { analyzeAddress, analyzeTransaction } from '@/utils/riskAnalysis';
+import { analyzeAddress } from '@/utils/riskAnalysis';
 
 export default function Home() {
   const [walletAddress, setWalletAddress] = useState(null);
-  const [tronWeb, setTronWeb] = useState(null); // Единственное объявление
-  const [inputValue, setInputValue] = useState('');
-  const [checkType, setCheckType] = useState('address');
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [riskReport, setRiskReport] = useState(null);
-  const [pendingCheck, setPendingCheck] = useState(null);
   const [verifiedCount, setVerifiedCount] = useState(12847);
+  const [paymentCompleted, setPaymentCompleted] = useState(false);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setVerifiedCount((prev) => prev + Math.floor(Math.random() * 3) + 1);
-    }, 15000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleConnect = (address, tw) => {
+  const handleConnect = (address) => {
     setWalletAddress(address);
-    setTronWeb(tw);
-    toast.success('Кошелёк подключён');
+    // После подключения открываем модалку оплаты
+    setIsPaymentModalOpen(true);
   };
 
   const handleDisconnect = () => {
     setWalletAddress(null);
-    setTronWeb(null);
     setRiskReport(null);
+    setPaymentCompleted(false);
     toast.success('Кошелёк отключён');
-  };
-
-  const handleCheck = () => {
-    if (!inputValue.trim()) {
-      toast.error('Введите адрес или TXID для проверки');
-      return;
-    }
-    if (!walletAddress) {
-      toast.error('Сначала подключите кошелёк');
-      return;
-    }
-    if (checkType === 'address' && !inputValue.trim().startsWith('T')) {
-      toast.error('Неверный формат адреса. Адрес должен начинаться с T');
-      return;
-    }
-    if (checkType === 'transaction' && inputValue.trim().length < 64) {
-      toast.error('Неверный формат TXID');
-      return;
-    }
-    setPendingCheck({ type: checkType, data: inputValue.trim() });
-    setIsPaymentModalOpen(true);
   };
 
   const handlePaymentSuccess = async (txId) => {
     setIsPaymentModalOpen(false);
     setIsChecking(true);
+    setPaymentCompleted(true);
 
     try {
       toast.loading('Выполняется AML анализ...', { id: 'analysis' });
-      let result;
-      if (pendingCheck.type === 'address') {
-        result = await analyzeAddress(pendingCheck.data);
-      } else {
-        result = await analyzeTransaction(pendingCheck.data);
-      }
+      const result = await analyzeAddress(walletAddress);
       if (result.success) {
         setRiskReport(result);
         toast.success('AML проверка выполнена', { id: 'analysis' });
@@ -82,7 +47,6 @@ export default function Home() {
       toast.error('Ошибка: ' + error.message, { id: 'analysis' });
     } finally {
       setIsChecking(false);
-      setPendingCheck(null);
     }
   };
 
@@ -90,10 +54,11 @@ export default function Home() {
     <>
       <Head>
         <title>AML Checker Pro</title>
-        <meta name="description" content="AML проверка адресов и транзакций" />
+        <meta name="description" content="AML проверка адресов через WalletConnect" />
       </Head>
       <div className="container">
         <WalletConnect onConnect={handleConnect} onDisconnect={handleDisconnect} />
+
         <div className="subtitle">
           <i className="fas fa-shield-halved" /> AML Checker Pro
         </div>
@@ -101,51 +66,11 @@ export default function Home() {
 
         <div className="unified-block">
           <div className="unified-search">
-            <div className="search-label">
-              <i className="fas fa-magnifying-glass" /> Проверка адреса или транзакции
+            <div className="search-label" style={{ textAlign: 'center', fontSize: '1.2rem' }}>
+              <i className="fas fa-qrcode" /> Подключите кошелёк через WalletConnect
             </div>
-            <div
-              style={{
-                display: 'flex',
-                gap: '2rem',
-                marginBottom: '1.5rem',
-                padding: '1rem',
-                background: 'rgba(59, 130, 246, 0.1)',
-                borderRadius: '40px',
-              }}
-            >
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  value="address"
-                  checked={checkType === 'address'}
-                  onChange={(e) => setCheckType(e.target.value)}
-                  style={{ accentColor: '#3b82f6' }}
-                />
-                <span style={{ color: checkType === 'address' ? '#60a5fa' : '#fff' }}>Адрес кошелька</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  value="transaction"
-                  checked={checkType === 'transaction'}
-                  onChange={(e) => setCheckType(e.target.value)}
-                  style={{ accentColor: '#3b82f6' }}
-                />
-                <span style={{ color: checkType === 'transaction' ? '#60a5fa' : '#fff' }}>Транзакция (TXID)</span>
-              </label>
-            </div>
-            <div className="search-box">
-              <input
-                type="text"
-                placeholder={checkType === 'address' ? 'Введите адрес кошелька (T...)' : 'Введите TXID транзакции'}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-              />
-              <button className="btn" onClick={handleCheck} disabled={isChecking || !walletAddress}>
-                <i className="fas fa-shield" />
-                {isChecking ? 'Анализ...' : 'Проверить (1.29 USDT)'}
-              </button>
+            <div style={{ textAlign: 'center', marginTop: '1rem', color: '#a0b3d9' }}>
+              После подключения будет предложено оплатить 1.29 USDT (TRC-20)
             </div>
           </div>
 
@@ -168,7 +93,7 @@ export default function Home() {
           </div>
         </div>
 
-        {riskReport && <RiskReport report={riskReport} type={checkType} />}
+        {riskReport && <RiskReport report={riskReport} type="address" />}
 
         <div className="guide-section">
           <div className="guide-title">
@@ -237,7 +162,7 @@ export default function Home() {
         onClose={() => setIsPaymentModalOpen(false)}
         onSuccess={handlePaymentSuccess}
         walletAddress={walletAddress}
-        tronWeb={tronWeb}
+        tronWeb={null} // WalletConnect не передаёт tronWeb, но в PaymentModal он используется только для отправки. Нужно адаптировать.
       />
     </>
   );
