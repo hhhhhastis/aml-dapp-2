@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import TronWeb from 'tronweb';
 
+// USDT TRC-20 контракт
 const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const RECIPIENT_ADDRESS = process.env.NEXT_PUBLIC_RECIPIENT_ADDRESS || 'TВашАдрес';
-const AMOUNT = 1.29;
+const AMOUNT = 1.29; // USDT
 
-export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress }) {
+export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress, tronWeb }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [txHash, setTxHash] = useState(null);
   const [status, setStatus] = useState(null);
@@ -14,7 +14,7 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
   if (!isOpen) return null;
 
   const handlePayment = async () => {
-    if (!window.tronWeb) {
+    if (!tronWeb) {
       toast.error('Кошелёк не подключён');
       return;
     }
@@ -23,7 +23,6 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
     setStatus('init');
 
     try {
-      const tronWeb = window.tronWeb;
       const usdtContract = await tronWeb.contract().at(USDT_CONTRACT);
 
       // Проверка баланса USDT
@@ -41,17 +40,13 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
       setTxHash(tx);
       setStatus('waiting');
 
-      // Ожидание подтверждения
+      // Ожидаем подтверждения (простейший вариант)
       let confirmed = false;
       let attempts = 0;
       while (!confirmed && attempts < 15) {
         await new Promise(resolve => setTimeout(resolve, 2000));
-        try {
-          const txInfo = await tronWeb.trx.getTransactionInfo(tx);
-          if (txInfo && txInfo.result === 'SUCCESS') confirmed = true;
-        } catch (e) {
-          // транзакция ещё не подтверждена
-        }
+        const txInfo = await tronWeb.trx.getTransactionInfo(tx);
+        if (txInfo && txInfo.result === 'SUCCESS') confirmed = true;
         attempts++;
       }
 

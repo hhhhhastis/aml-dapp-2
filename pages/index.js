@@ -8,7 +8,7 @@ import { analyzeAddress, analyzeTransaction } from '@/utils/riskAnalysis';
 
 export default function Home() {
   const [walletAddress, setWalletAddress] = useState(null);
-  const [tronWeb, setTronWeb] = useState(null); // экземпляр TronWeb из WalletConnect
+  const [tronWeb, setTronWeb] = useState(null);       // <-- добавляем состояние для экземпляра TronWeb
   const [inputValue, setInputValue] = useState('');
   const [checkType, setCheckType] = useState('address');
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -237,7 +237,7 @@ export default function Home() {
         onClose={() => setIsPaymentModalOpen(false)}
         onSuccess={handlePaymentSuccess}
         walletAddress={walletAddress}
-        tronWeb={tronWeb}
+        tronWeb={tronWeb}                     // <-- передаём экземпляр TronWeb
       />
     </>
   );
