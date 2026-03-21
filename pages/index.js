@@ -8,6 +8,7 @@ import { analyzeAddress, analyzeTransaction } from '@/utils/riskAnalysis';
 
 export default function Home() {
   const [walletAddress, setWalletAddress] = useState(null);
+  const [tronWeb, setTronWeb] = useState(null); // экземпляр TronWeb из WalletConnect
   const [inputValue, setInputValue] = useState('');
   const [checkType, setCheckType] = useState('address');
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -23,13 +24,15 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleConnect = (address) => {
+  const handleConnect = (address, tw) => {
     setWalletAddress(address);
+    setTronWeb(tw);
     toast.success('Кошелёк подключён');
   };
 
   const handleDisconnect = () => {
     setWalletAddress(null);
+    setTronWeb(null);
     setRiskReport(null);
     toast.success('Кошелёк отключён');
   };
@@ -51,9 +54,6 @@ export default function Home() {
       toast.error('Неверный формат TXID');
       return;
     }
-    
-
-    
     setPendingCheck({ type: checkType, data: inputValue.trim() });
     setIsPaymentModalOpen(true);
   };
@@ -138,7 +138,7 @@ export default function Home() {
             <div className="search-box">
               <input
                 type="text"
-                placeholder={checkType === 'address' ? 'Введите адрес кошелька (0x...)' : 'Введите TXID транзакции'}
+                placeholder={checkType === 'address' ? 'Введите адрес кошелька (T...)' : 'Введите TXID транзакции'}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
               />
@@ -237,6 +237,7 @@ export default function Home() {
         onClose={() => setIsPaymentModalOpen(false)}
         onSuccess={handlePaymentSuccess}
         walletAddress={walletAddress}
+        tronWeb={tronWeb}
       />
     </>
   );

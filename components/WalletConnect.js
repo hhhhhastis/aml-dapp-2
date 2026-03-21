@@ -1,179 +1,100 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { WalletConnectModal } from '@walletconnect/modal';
+import { TronWalletConnect } from '@walletconnect/tron';
 import TronWeb from 'tronweb';
 import toast from 'react-hot-toast';
+
+const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
 
 export default function WalletConnect({ onConnect, onDisconnect }) {
   const [address, setAddress] = useState(null);
   const [balance, setBalance] = useState(null);
   const [connecting, setConnecting] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const [tronWebInstance, setTronWebInstance] = useState(null);
 
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const [wcClient, setWcClient] = useState(null);
 
   useEffect(() => {
-    const checkExisting = async () => {
-      let attempts = 0;
-      while (!window.tronWeb && attempts < 25) {
-        await new Promise(r => setTimeout(r, 200));
-        attempts++;
-      }
-      if (window.tronWeb && window.tronWeb.defaultAddress?.base58) {
-        const addr = window.tronWeb.defaultAddress.base58;
-        setAddress(addr);
-        onConnect?.(addr);
-        const bal = await window.tronWeb.trx.getBalance(addr);
-        setBalance(TronWeb.fromSun(bal));
-      }
+    const init = async () => {
+      const client = new TronWalletConnect({
+        projectId,
+        metadata: {
+          name: 'AML Checker',
+          description: 'AML verification dApp',
+          url: window.location.origin,
+          icons: [],
+        },
+      });
+      setWcClient(client);
     };
-    checkExisting();
+    init();
   }, []);
 
-  const connectWallet = async () => {
+  const connect = async () => {
+    if (!wcClient) {
+      toast.error('Инициализация...');
+      return;
+    }
     setConnecting(true);
     try {
-      let attempts = 0;
-      while (!window.tronWeb && attempts < 25) {
-        await new Promise(r => setTimeout(r, 200));
-        attempts++;
+      const session = await wcClient.connect();
+      if (session && session.accounts && session.accounts[0]) {
+        const addr = session.accounts[0];
+        const tronWeb = session.tronWeb; // экземпляр TronWeb, готовый к использованию
+        setAddress(addr);
+        setTronWebInstance(tronWeb);
+        onConnect?.(addr, tronWeb); // передаём tronWeb в родительский компонент
+        const bal = await tronWeb.trx.getBalance(addr);
+        setBalance(TronWeb.fromSun(bal));
+        toast.success('Кошелёк подключён через WalletConnect');
+      } else {
+        throw new Error('Не удалось получить адрес');
       }
-      if (!window.tronWeb) throw new Error('Кошелёк не обнаружен. Установите TronLink или откройте сайт в TrustWallet.');
-
-      let addr = window.tronWeb.defaultAddress?.base58;
-      if (!addr && window.tronWeb.requestAccounts) {
-        const accounts = await window.tronWeb.requestAccounts();
-        addr = accounts[0];
-      }
-      if (!addr) throw new Error('Не удалось получить адрес');
-
-      setAddress(addr);
-      onConnect?.(addr);
-      const bal = await window.tronWeb.trx.getBalance(addr);
-      setBalance(TronWeb.fromSun(bal));
-      toast.success('Кошелёк подключён');
     } catch (err) {
       console.error(err);
-      toast.error(err.message);
+      toast.error(err.message || 'Ошибка подключения');
     } finally {
       setConnecting(false);
     }
   };
 
-  const disconnect = () => {
+  const disconnect = async () => {
+    if (wcClient) {
+      await wcClient.disconnect();
+    }
     setAddress(null);
     setBalance(null);
+    setTronWebInstance(null);
     onDisconnect?.();
     toast.success('Кошелёк отключён');
-  };
-
-  const copyLinkAndOpenTrust = () => {
-    const currentUrl = window.location.href;
-    navigator.clipboard.writeText(currentUrl).then(() => {
-      alert('Ссылка скопирована!\n\n1. Откройте TrustWallet\n2. Перейдите в DApp Browser\n3. Вставьте ссылку в адресную строку');
-    }).catch(() => {
-      alert('Не удалось скопировать ссылку. Пожалуйста, откройте страницу в TrustWallet вручную.');
-    });
   };
 
   const formatAddress = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem', position: 'relative' }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' }}>
       {!address ? (
-        <div ref={menuRef} style={{ position: 'relative' }}>
-          <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            disabled={connecting}
-            style={{
-              background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '40px',
-              padding: '1rem 2rem',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: connecting ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.8rem',
-              opacity: connecting ? 0.7 : 1,
-            }}
-          >
-            {connecting ? <div className="spinner" /> : <i className="fas fa-wallet" />}
-            {connecting ? 'Подключение...' : 'Подключить кошелёк'}
-          </button>
-          {menuOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                right: 0,
-                background: '#1a1f2e',
-                border: '1px solid rgba(59,130,246,0.2)',
-                borderRadius: '20px',
-                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
-                zIndex: 10,
-                minWidth: '220px',
-                overflow: 'hidden',
-              }}
-            >
-              <button
-                onClick={connectWallet}
-                style={{
-                  width: '100%',
-                  padding: '12px 20px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                  fontSize: '0.9rem',
-                }}
-                onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
-                onMouseLeave={(e) => (e.target.style.background = 'transparent')}
-              >
-                <i className="fas fa-plug" style={{ width: '20px' }} />
-                TronLink / TrustWallet (встроенный)
-              </button>
-              {isMobile && (
-                <button
-                  onClick={copyLinkAndOpenTrust}
-                  style={{
-                    width: '100%',
-                    padding: '12px 20px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s',
-                    fontSize: '0.9rem',
-                  }}
-                  onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
-                  onMouseLeave={(e) => (e.target.style.background = 'transparent')}
-                >
-                  <i className="fas fa-copy" style={{ width: '20px' }} />
-                  Открыть в TrustWallet (скопировать ссылку)
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <button
+          onClick={connect}
+          disabled={connecting}
+          style={{
+            background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '40px',
+            padding: '1rem 2rem',
+            fontSize: '1rem',
+            fontWeight: '600',
+            cursor: connecting ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.8rem',
+            opacity: connecting ? 0.7 : 1,
+          }}
+        >
+          {connecting ? <div className="spinner" /> : <i className="fas fa-qrcode" />}
+          {connecting ? 'Подключение...' : 'Подключить кошелёк'}
+        </button>
       ) : (
         <div
           style={{
