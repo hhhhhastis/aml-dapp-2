@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { EthereumProvider } from '@walletconnect/ethereum-provider';
-import { ethers } from 'ethers';
+import TronWeb from 'tronweb';
 import toast from 'react-hot-toast';
-
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
 
 export default function WalletConnect({ onConnect, onDisconnect }) {
   const [address, setAddress] = useState(null);
@@ -23,44 +20,44 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Проверка существующего подключения
+  // Проверка уже подключённого кошелька
   useEffect(() => {
     const checkExisting = async () => {
-      if (window.ethereum && window.ethereum.selectedAddress) {
-        const addr = window.ethereum.selectedAddress;
+      if (window.tronWeb && window.tronWeb.defaultAddress?.base58) {
+        const addr = window.tronWeb.defaultAddress.base58;
         setAddress(addr);
         onConnect?.(addr);
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const bal = await provider.getBalance(addr);
-        setBalance(ethers.utils.formatEther(bal));
+        const bal = await window.tronWeb.trx.getBalance(addr);
+        setBalance(TronWeb.fromSun(bal));
       }
     };
     checkExisting();
   }, []);
 
-  // WalletConnect подключение
-  const connectWalletConnect = async () => {
+  // TronLink (расширение) подключение
+  const connectTronLink = async () => {
     setMenuOpen(false);
     setConnecting(true);
     try {
-      const provider = await EthereumProvider.init({
-        projectId,
-        chains: [1],
-        showQrModal: true,
-        qrModalOptions: { themeMode: 'dark' },
-      });
-      await provider.connect();
-      const ethersProvider = new ethers.providers.Web3Provider(provider);
-      const signer = ethersProvider.getSigner();
-      const addr = await signer.getAddress();
+      if (!window.tronWeb) {
+        toast.error('TronLink не установлен. Установите расширение TronLink.');
+        window.open('https://www.tronlink.org/', '_blank');
+        return;
+      }
+      // Запрашиваем разрешение
+      if (!window.tronWeb.ready) {
+        await window.tronWeb.request({ method: 'tron_requestAccounts' });
+      }
+      const addr = window.tronWeb.defaultAddress?.base58;
+      if (!addr) throw new Error('Не удалось получить адрес');
       setAddress(addr);
       onConnect?.(addr);
-      const bal = await ethersProvider.getBalance(addr);
-      setBalance(ethers.utils.formatEther(bal));
-      toast.success('Кошелёк подключён через WalletConnect');
+      const bal = await window.tronWeb.trx.getBalance(addr);
+      setBalance(TronWeb.fromSun(bal));
+      toast.success('Кошелёк подключён через TronLink');
     } catch (err) {
       console.error(err);
-      toast.error(err.message || 'Ошибка подключения WalletConnect');
+      toast.error(err.message || 'Ошибка подключения TronLink');
     } finally {
       setConnecting(false);
     }
@@ -71,18 +68,17 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     setMenuOpen(false);
     setConnecting(true);
     try {
-      if (!window.ethereum) {
+      if (!window.tronWeb) {
         toast.error('TrustWallet не обнаружен. Откройте сайт во встроенном браузере TrustWallet.');
         return;
       }
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const addr = accounts[0];
+      // В TrustWallet TronWeb уже готов, просто получаем адрес
+      const addr = window.tronWeb.defaultAddress?.base58;
       if (!addr) throw new Error('Нет адреса');
       setAddress(addr);
       onConnect?.(addr);
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const bal = await provider.getBalance(addr);
-      setBalance(ethers.utils.formatEther(bal));
+      const bal = await window.tronWeb.trx.getBalance(addr);
+      setBalance(TronWeb.fromSun(bal));
       toast.success('TrustWallet подключён');
     } catch (err) {
       console.error(err);
@@ -142,7 +138,7 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
               }}
             >
               <button
-                onClick={connectWalletConnect}
+                onClick={connectTronLink}
                 style={{
                   width: '100%',
                   padding: '12px 20px',
@@ -159,8 +155,8 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
                 onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
                 onMouseLeave={(e) => (e.target.style.background = 'transparent')}
               >
-                <i className="fas fa-qrcode" style={{ width: '20px' }} />
-                WalletConnect (QR-код)
+                <i className="fas fa-plug" style={{ width: '20px' }} />
+                TronLink (расширение)
               </button>
               <button
                 onClick={connectTrustWallet}
@@ -180,7 +176,7 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
                 onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
                 onMouseLeave={(e) => (e.target.style.background = 'transparent')}
               >
-                <i className="fas fa-wallet" style={{ width: '20px' }} />
+                <i className="fas fa-mobile-alt" style={{ width: '20px' }} />
                 TrustWallet (встроенный)
               </button>
             </div>
@@ -205,7 +201,7 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
             </div>
             {balance && (
               <div style={{ fontSize: '0.75rem', color: '#a0b3d9' }}>
-                {parseFloat(balance).toFixed(4)} ETH
+                {parseFloat(balance).toFixed(2)} TRX
               </div>
             )}
           </div>

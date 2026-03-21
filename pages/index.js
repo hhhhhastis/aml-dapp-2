@@ -43,14 +43,17 @@ export default function Home() {
       toast.error('Сначала подключите кошелёк');
       return;
     }
-    if (checkType === 'address' && !inputValue.trim().startsWith('0x')) {
-      toast.error('Неверный формат адреса. Адрес должен начинаться с 0x');
+    if (checkType === 'address' && !inputValue.trim().startsWith('T')) {
+      toast.error('Неверный формат адреса. Адрес должен начинаться с T');
       return;
     }
     if (checkType === 'transaction' && inputValue.trim().length < 64) {
       toast.error('Неверный формат TXID');
       return;
     }
+    
+
+    
     setPendingCheck({ type: checkType, data: inputValue.trim() });
     setIsPaymentModalOpen(true);
   };

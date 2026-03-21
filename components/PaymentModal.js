@@ -1,15 +1,11 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { ethers } from 'ethers';
+import TronWeb from 'tronweb';
 
-const USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-const RECIPIENT_ADDRESS = process.env.NEXT_PUBLIC_RECIPIENT_ADDRESS || '0xВашАдрес';
-const AMOUNT = 1.29;
-
-const USDT_ABI = [
-  'function transfer(address to, uint256 amount) returns (bool)',
-  'function balanceOf(address account) view returns (uint256)',
-];
+// USDT TRC-20 контракт
+const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const RECIPIENT_ADDRESS = process.env.NEXT_PUBLIC_RECIPIENT_ADDRESS || 'TВашАдрес';
+const AMOUNT = 1.29; // USDT
 
 export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress }) {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -19,7 +15,7 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
   if (!isOpen) return null;
 
   const handlePayment = async () => {
-    if (!window.ethereum) {
+    if (!window.tronWeb) {
       toast.error('Кошелёк не подключён');
       return;
     }
@@ -28,28 +24,43 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
     setStatus('init');
 
     try {
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
+      const tronWeb = window.tronWeb;
+      const usdtContract = await tronWeb.contract().at(USDT_CONTRACT);
 
-      const balance = await contract.balanceOf(walletAddress);
-      const balanceFormatted = ethers.utils.formatUnits(balance, 18);
-      if (parseFloat(balanceFormatted) < AMOUNT) {
-        toast.error(`Недостаточно USDT. Баланс: ${balanceFormatted}`);
+      // Проверка баланса USDT
+      const balance = await usdtContract.balanceOf(walletAddress).call();
+      const usdtBalance = tronWeb.fromSun(balance.toString()) / 1e6;
+      if (usdtBalance < AMOUNT) {
+        toast.error(`Недостаточно USDT. Баланс: ${usdtBalance.toFixed(2)} USDT`);
         setIsProcessing(false);
         return;
       }
 
       setStatus('sending');
-      const amountWei = ethers.utils.parseUnits(AMOUNT.toString(), 18);
-      const tx = await contract.transfer(RECIPIENT_ADDRESS, amountWei);
-      setTxHash(tx.hash);
+      const amountInSun = Math.floor(AMOUNT * 1e6);
+      const tx = await usdtContract.transfer(RECIPIENT_ADDRESS, amountInSun).send();
+      setTxHash(tx);
       setStatus('waiting');
 
-      await tx.wait();
-      setStatus('success');
-      toast.success('Платёж подтверждён!');
-      onSuccess(tx.hash);
+      // Ожидаем подтверждения (простейший вариант)
+      let confirmed = false;
+      let attempts = 0;
+      while (!confirmed && attempts < 15) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const txInfo = await tronWeb.trx.getTransactionInfo(tx);
+        if (txInfo && txInfo.result === 'SUCCESS') confirmed = true;
+        attempts++;
+      }
+
+      if (confirmed) {
+        setStatus('success');
+        toast.success('Платёж подтверждён!');
+        onSuccess(tx);
+      } else {
+        setStatus('pending');
+        toast.success('Транзакция отправлена, ожидает подтверждения');
+        onSuccess(tx);
+      }
     } catch (err) {
       console.error(err);
       setStatus('error');
@@ -64,81 +75,33 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
   return (
     <div className="payment-modal-overlay" onClick={onClose}>
       <div className="payment-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>
-          ×
-        </button>
-        <h2>
-          <i className="fas fa-lock" /> Оплата AML проверки
-        </h2>
+        <button className="modal-close" onClick={onClose}>×</button>
+        <h2><i className="fas fa-lock" /> Оплата AML проверки</h2>
         <div className="payment-details">
-          <div>
-            <span>Услуга:</span>
-            <span>AML проверка</span>
-          </div>
-          <div>
-            <span>Стоимость:</span>
-            <span>{AMOUNT} USDT (ERC-20)</span>
-          </div>
-          <div>
-            <span>Получатель:</span>
-            <span>{formatAddress(RECIPIENT_ADDRESS)}</span>
-          </div>
+          <div><span>Услуга:</span><span>AML проверка</span></div>
+          <div><span>Стоимость:</span><span>{AMOUNT} USDT (TRC-20)</span></div>
+          <div><span>Получатель:</span><span>{formatAddress(RECIPIENT_ADDRESS)}</span></div>
           {walletAddress && (
-            <div>
-              <span>Ваш кошелёк:</span>
-              <span>{formatAddress(walletAddress)}</span>
-            </div>
+            <div><span>Ваш кошелёк:</span><span>{formatAddress(walletAddress)}</span></div>
           )}
         </div>
         {status && (
           <div className="transaction-status">
-            {status === 'init' && (
-              <>
-                <div className="spinner" /> Подготовка...
-              </>
-            )}
-            {status === 'sending' && (
-              <>
-                <div className="spinner" /> Отправка транзакции...
-              </>
-            )}
-            {status === 'waiting' && (
-              <>
-                <div className="spinner" /> Ожидание подтверждения...
-              </>
-            )}
-            {status === 'success' && (
-              <>
-                <i className="fas fa-check-circle" /> Платёж подтверждён!
-              </>
-            )}
-            {status === 'error' && (
-              <>
-                <i className="fas fa-exclamation-circle" /> Ошибка
-              </>
-            )}
+            {status === 'init' && <><div className="spinner" /> Подготовка...</>}
+            {status === 'sending' && <><div className="spinner" /> Отправка транзакции...</>}
+            {status === 'waiting' && <><div className="spinner" /> Ожидание подтверждения...</>}
+            {status === 'success' && <><i className="fas fa-check-circle" /> Платёж подтверждён!</>}
+            {status === 'pending' && <><i className="fas fa-hourglass-half" /> Транзакция отправлена, ожидает подтверждения</>}
+            {status === 'error' && <><i className="fas fa-exclamation-circle" /> Ошибка</>}
           </div>
         )}
         <div className="payment-buttons">
-          <button
-            className="payment-button secondary"
-            onClick={onClose}
-            disabled={isProcessing}
-          >
-            Отмена
-          </button>
-          <button
-            className="payment-button primary"
-            onClick={handlePayment}
-            disabled={isProcessing}
-          >
+          <button className="payment-button secondary" onClick={onClose} disabled={isProcessing}>Отмена</button>
+          <button className="payment-button primary" onClick={handlePayment} disabled={isProcessing}>
             {isProcessing ? 'Обработка...' : `Оплатить ${AMOUNT} USDT`}
           </button>
         </div>
-        <p>
-          <i className="fas fa-info-circle" /> Транзакция будет выполнена в сети
-          Ethereum. Убедитесь, что у вас есть ETH для комиссии.
-        </p>
+        <p><i className="fas fa-info-circle" /> Транзакция будет выполнена в сети TRON. Убедитесь, что у вас есть TRX для комиссии.</p>
       </div>
     </div>
   );
