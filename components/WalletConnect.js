@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import TronWeb from 'tronweb';
 import toast from 'react-hot-toast';
 
 export default function WalletConnect({ onConnect, onDisconnect }) {
@@ -8,7 +9,9 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  // Закрытие меню
+  // Определяем, мобильное ли устройство
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -19,7 +22,7 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Проверка существующего подключения
+  // Проверка уже подключённого кошелька
   useEffect(() => {
     const checkExisting = async () => {
       let attempts = 0;
@@ -31,12 +34,8 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
         const addr = window.tronWeb.defaultAddress.base58;
         setAddress(addr);
         onConnect?.(addr);
-        try {
-          const bal = await window.tronWeb.trx.getBalance(addr);
-          setBalance(window.tronWeb.fromSun(bal));
-        } catch (e) {
-          console.warn('Balance error', e);
-        }
+        const bal = await window.tronWeb.trx.getBalance(addr);
+        setBalance(TronWeb.fromSun(bal));
       }
     };
     checkExisting();
@@ -44,38 +43,25 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
 
   const connectWallet = async () => {
     setConnecting(true);
-    setMenuOpen(false);
     try {
-      // Ожидаем появления window.tronWeb (до 5 секунд)
       let attempts = 0;
       while (!window.tronWeb && attempts < 25) {
         await new Promise(r => setTimeout(r, 200));
         attempts++;
       }
-      if (!window.tronWeb) {
-        throw new Error('TrustWallet не обнаружен. Откройте сайт во встроенном браузере TrustWallet.');
-      }
+      if (!window.tronWeb) throw new Error('Кошелёк не обнаружен. Установите TronLink или откройте сайт в TrustWallet.');
 
-      // Если TronWeb уже готов, но адреса нет – запрашиваем
       let addr = window.tronWeb.defaultAddress?.base58;
       if (!addr && window.tronWeb.requestAccounts) {
-        try {
-          const accounts = await window.tronWeb.requestAccounts();
-          addr = accounts?.[0];
-        } catch (err) {
-          console.warn('requestAccounts failed', err);
-        }
+        const accounts = await window.tronWeb.requestAccounts();
+        addr = accounts[0];
       }
-      if (!addr) {
-        // В TrustWallet может быть готовая сессия без requestAccounts
-        addr = window.tronWeb.defaultAddress?.base58;
-      }
-      if (!addr) throw new Error('Не удалось получить адрес кошелька');
+      if (!addr) throw new Error('Не удалось получить адрес');
 
       setAddress(addr);
       onConnect?.(addr);
       const bal = await window.tronWeb.trx.getBalance(addr);
-      setBalance(window.tronWeb.fromSun(bal));
+      setBalance(TronWeb.fromSun(bal));
       toast.success('Кошелёк подключён');
     } catch (err) {
       console.error(err);
@@ -90,6 +76,11 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     setBalance(null);
     onDisconnect?.();
     toast.success('Кошелёк отключён');
+  };
+
+  const openInTrustWallet = () => {
+    const currentUrl = encodeURIComponent(window.location.href);
+    window.location.href = `trust://browser?url=${currentUrl}`;
   };
 
   const formatAddress = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -152,9 +143,32 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
                 onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
                 onMouseLeave={(e) => (e.target.style.background = 'transparent')}
               >
-                <i className="fas fa-wallet" style={{ width: '20px' }} />
-                TrustWallet (встроенный)
+                <i className="fas fa-plug" style={{ width: '20px' }} />
+                TronLink / TrustWallet (встроенный)
               </button>
+              {isMobile && (
+                <button
+                  onClick={openInTrustWallet}
+                  style={{
+                    width: '100%',
+                    padding: '12px 20px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                    fontSize: '0.9rem',
+                  }}
+                  onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
+                  onMouseLeave={(e) => (e.target.style.background = 'transparent')}
+                >
+                  <i className="fas fa-external-link-alt" style={{ width: '20px' }} />
+                  Открыть в TrustWallet (приложение)
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -175,7 +189,7 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
             <div style={{ color: '#60a5fa', fontFamily: 'monospace' }}>
               {formatAddress(address)}
             </div>
-            {balance !== null && (
+            {balance && (
               <div style={{ fontSize: '0.75rem', color: '#a0b3d9' }}>
                 {parseFloat(balance).toFixed(2)} TRX
               </div>
