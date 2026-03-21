@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 
-// USDT TRC-20 контракт
 const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const RECIPIENT_ADDRESS = process.env.NEXT_PUBLIC_RECIPIENT_ADDRESS || 'TВашАдрес';
-const AMOUNT = 1.29; // USDT
+const AMOUNT = 1.29;
 
 export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress, tronWeb }) {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -24,8 +23,6 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
 
     try {
       const usdtContract = await tronWeb.contract().at(USDT_CONTRACT);
-
-      // Проверка баланса USDT
       const balance = await usdtContract.balanceOf(walletAddress).call();
       const usdtBalance = tronWeb.fromSun(balance.toString()) / 1e6;
       if (usdtBalance < AMOUNT) {
@@ -40,7 +37,6 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
       setTxHash(tx);
       setStatus('waiting');
 
-      // Ожидаем подтверждения (простейший вариант)
       let confirmed = false;
       let attempts = 0;
       while (!confirmed && attempts < 15) {
