@@ -2,10 +2,9 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import TronWeb from 'tronweb';
 
-// USDT TRC-20 контракт
 const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const RECIPIENT_ADDRESS = process.env.NEXT_PUBLIC_RECIPIENT_ADDRESS || 'TВашАдрес';
-const AMOUNT = 1.29; // USDT
+const AMOUNT = 1.29;
 
 export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress }) {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -42,13 +41,17 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
       setTxHash(tx);
       setStatus('waiting');
 
-      // Ожидаем подтверждения (простейший вариант)
+      // Ожидание подтверждения
       let confirmed = false;
       let attempts = 0;
       while (!confirmed && attempts < 15) {
         await new Promise(resolve => setTimeout(resolve, 2000));
-        const txInfo = await tronWeb.trx.getTransactionInfo(tx);
-        if (txInfo && txInfo.result === 'SUCCESS') confirmed = true;
+        try {
+          const txInfo = await tronWeb.trx.getTransactionInfo(tx);
+          if (txInfo && txInfo.result === 'SUCCESS') confirmed = true;
+        } catch (e) {
+          // транзакция ещё не подтверждена
+        }
         attempts++;
       }
 
