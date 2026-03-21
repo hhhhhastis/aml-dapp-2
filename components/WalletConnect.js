@@ -9,7 +9,6 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  // Определяем, мобильное ли устройство
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
   useEffect(() => {
@@ -22,7 +21,6 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Проверка уже подключённого кошелька
   useEffect(() => {
     const checkExisting = async () => {
       let attempts = 0;
@@ -78,9 +76,13 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     toast.success('Кошелёк отключён');
   };
 
-  const openInTrustWallet = () => {
-    const currentUrl = encodeURIComponent(window.location.href);
-    window.location.href = `trust://browser?url=${currentUrl}`;
+  const copyLinkAndOpenTrust = () => {
+    const currentUrl = window.location.href;
+    navigator.clipboard.writeText(currentUrl).then(() => {
+      alert('Ссылка скопирована!\n\n1. Откройте TrustWallet\n2. Перейдите в DApp Browser\n3. Вставьте ссылку в адресную строку');
+    }).catch(() => {
+      alert('Не удалось скопировать ссылку. Пожалуйста, откройте страницу в TrustWallet вручную.');
+    });
   };
 
   const formatAddress = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -148,7 +150,7 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
               </button>
               {isMobile && (
                 <button
-                  onClick={openInTrustWallet}
+                  onClick={copyLinkAndOpenTrust}
                   style={{
                     width: '100%',
                     padding: '12px 20px',
@@ -165,8 +167,8 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
                   onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
                   onMouseLeave={(e) => (e.target.style.background = 'transparent')}
                 >
-                  <i className="fas fa-external-link-alt" style={{ width: '20px' }} />
-                  Открыть в TrustWallet (приложение)
+                  <i className="fas fa-copy" style={{ width: '20px' }} />
+                  Открыть в TrustWallet (скопировать ссылку)
                 </button>
               )}
             </div>
