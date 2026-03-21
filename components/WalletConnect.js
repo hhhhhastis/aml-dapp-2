@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import TronWeb from 'tronweb';
 import toast from 'react-hot-toast';
 
@@ -6,21 +6,8 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
   const [address, setAddress] = useState(null);
   const [balance, setBalance] = useState(null);
   const [connecting, setConnecting] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
 
-  // Закрытие меню при клике вне
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Проверка уже подключённого кошелька
+  // Проверка при загрузке
   useEffect(() => {
     const checkExisting = async () => {
       if (window.tronWeb && window.tronWeb.defaultAddress?.base58) {
@@ -34,55 +21,31 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     checkExisting();
   }, []);
 
-  // TronLink (расширение) подключение
-  const connectTronLink = async () => {
-    setMenuOpen(false);
-    setConnecting(true);
+  const connectWallet = async () => {
+  setConnecting(true);
     try {
-      if (!window.tronWeb) {
-        toast.error('TronLink не установлен. Установите расширение TronLink.');
-        window.open('https://www.tronlink.org/', '_blank');
-        return;
+      let attempts = 0;
+      while (!window.tronWeb && attempts < 25) {
+        await new Promise(r => setTimeout(r, 200));
+        attempts++;
       }
-      // Запрашиваем разрешение
-      if (!window.tronWeb.ready) {
-        await window.tronWeb.request({ method: 'tron_requestAccounts' });
+      if (!window.tronWeb) throw new Error('TrustWallet не обнаружен');
+    
+      // Если TronWeb уже готов, но адреса нет – запрашиваем
+      let addr = window.tronWeb.defaultAddress?.base58;
+      if (!addr && window.tronWeb.requestAccounts) {
+        const accounts = await window.tronWeb.requestAccounts();
+        addr = accounts[0];
       }
-      const addr = window.tronWeb.defaultAddress?.base58;
       if (!addr) throw new Error('Не удалось получить адрес');
+    
       setAddress(addr);
       onConnect?.(addr);
       const bal = await window.tronWeb.trx.getBalance(addr);
       setBalance(TronWeb.fromSun(bal));
-      toast.success('Кошелёк подключён через TronLink');
+      toast.success('Кошелёк подключён');
     } catch (err) {
-      console.error(err);
-      toast.error(err.message || 'Ошибка подключения TronLink');
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  // TrustWallet (встроенный) подключение
-  const connectTrustWallet = async () => {
-    setMenuOpen(false);
-    setConnecting(true);
-    try {
-      if (!window.tronWeb) {
-        toast.error('TrustWallet не обнаружен. Откройте сайт во встроенном браузере TrustWallet.');
-        return;
-      }
-      // В TrustWallet TronWeb уже готов, просто получаем адрес
-      const addr = window.tronWeb.defaultAddress?.base58;
-      if (!addr) throw new Error('Нет адреса');
-      setAddress(addr);
-      onConnect?.(addr);
-      const bal = await window.tronWeb.trx.getBalance(addr);
-      setBalance(TronWeb.fromSun(bal));
-      toast.success('TrustWallet подключён');
-    } catch (err) {
-      console.error(err);
-      toast.error(err.message || 'Ошибка подключения TrustWallet');
+      toast.error(err.message);
     } finally {
       setConnecting(false);
     }
@@ -98,90 +61,28 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
   const formatAddress = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem', position: 'relative' }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' }}>
       {!address ? (
-        <div ref={menuRef} style={{ position: 'relative' }}>
-          <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            disabled={connecting}
-            style={{
-              background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '40px',
-              padding: '1rem 2rem',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: connecting ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.8rem',
-              opacity: connecting ? 0.7 : 1,
-            }}
-          >
-            {connecting ? <div className="spinner" /> : <i className="fas fa-wallet" />}
-            {connecting ? 'Подключение...' : 'Подключить кошелёк'}
-          </button>
-          {menuOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                right: 0,
-                background: '#1a1f2e',
-                border: '1px solid rgba(59,130,246,0.2)',
-                borderRadius: '20px',
-                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
-                zIndex: 10,
-                minWidth: '220px',
-                overflow: 'hidden',
-              }}
-            >
-              <button
-                onClick={connectTronLink}
-                style={{
-                  width: '100%',
-                  padding: '12px 20px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                  fontSize: '0.9rem',
-                }}
-                onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
-                onMouseLeave={(e) => (e.target.style.background = 'transparent')}
-              >
-                <i className="fas fa-plug" style={{ width: '20px' }} />
-                TronLink (расширение)
-              </button>
-              <button
-                onClick={connectTrustWallet}
-                style={{
-                  width: '100%',
-                  padding: '12px 20px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                  fontSize: '0.9rem',
-                }}
-                onMouseEnter={(e) => (e.target.style.background = 'rgba(59,130,246,0.1)')}
-                onMouseLeave={(e) => (e.target.style.background = 'transparent')}
-              >
-                <i className="fas fa-mobile-alt" style={{ width: '20px' }} />
-                TrustWallet (встроенный)
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          onClick={connectWallet}
+          disabled={connecting}
+          style={{
+            background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '40px',
+            padding: '1rem 2rem',
+            fontSize: '1rem',
+            fontWeight: '600',
+            cursor: connecting ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.8rem',
+          }}
+        >
+          {connecting ? <div className="spinner" /> : <i className="fas fa-wallet" />}
+          {connecting ? 'Подключение...' : 'Подключить TrustWallet'}
+        </button>
       ) : (
         <div
           style={{
@@ -221,3 +122,9 @@ export default function WalletConnect({ onConnect, onDisconnect }) {
     </div>
   );
 }
+
+
+
+
+
+
