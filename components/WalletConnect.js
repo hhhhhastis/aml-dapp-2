@@ -10,19 +10,61 @@ const TRONGRID_URL        = 'https://nile.trongrid.io';
 const diagnoseTrustWallet = () => {
   if (!window.trustwallet) return 'trustwallet:none';
   const wt = window.trustwallet;
-  const wtKeys = Object.keys(wt).join(',');
-  let coreKeys = 'none';
-  if (wt.core) {
-    coreKeys = Object.keys(wt.core).join(',');
-    console.log('[core keys]:', coreKeys);
-    console.log('[core.tron]:', !!wt.core.tron);
-    console.log('[core.tronWeb]:', !!wt.core.tronWeb);
-    console.log('[core.providers]:', wt.core.providers ? JSON.stringify(Object.keys(wt.core.providers)) : 'none');
+  const core = wt.core;
+
+  if (core) {
+    console.log('[core] typeof:', typeof core);
+    console.log('[core] tron:', core.tron);
+    console.log('[core] tronWeb:', core.tronWeb);
+    console.log('[core] request:', typeof core.request);
+    console.log('[core] getAccounts:', typeof core.getAccounts);
+    console.log('[core] ethereum:', core.ethereum);
+    console.log('[core] solana:', core.solana);
+    console.log('[core] bitcoin:', core.bitcoin);
+
+    // Пробуем адрес
+    try {
+      const addr = core.address || core.defaultAddress || core.account;
+      console.log('[core] address:', addr);
+    } catch(e) {
+      console.log('[core] address err:', e.message);
+    }
+
+    // toString
+    try {
+      console.log('[core] toString:', core.toString());
+    } catch(e) {
+      console.log('[core] toString err:', e.message);
+    }
+
+    // JSON
+    try {
+      console.log('[core] JSON:', JSON.stringify(core));
+    } catch(e) {
+      console.log('[core] not serializable');
+    }
+
+    // Перебираем известные методы вручную
+    const knownMethods = [
+      'request', 'getAccounts', 'enable', 'send', 'sendAsync',
+      'on', 'off', 'emit', 'connect', 'disconnect',
+      'signTransaction', 'signMessage', 'isConnected',
+    ];
+    knownMethods.forEach(m => {
+      console.log(`[core] ${m}:`, typeof core[m]);
+    });
+
+    // Пробуем Symbol.iterator — иногда Proxy раскрывается через него
+    try {
+      for (const key in core) {
+        console.log('[core] for-in key:', key);
+      }
+    } catch(e) {
+      console.log('[core] for-in err:', e.message);
+    }
   }
-  if (wt.solana) console.log('[solana keys]:', Object.keys(wt.solana).join(','));
-  if (wt.ethereum) console.log('[ethereum keys]:', Object.keys(wt.ethereum).join(','));
-  console.log('[wt keys]:', wtKeys);
-  return 'core:' + (!!wt.core) + ' coreKeys:[' + coreKeys + ']';
+
+  return 'core:' + !!core + ' req:' + !!(core && core.request);
 };
 
 // ─── Все возможные источники tronWeb ─────────────────────────────────────────
