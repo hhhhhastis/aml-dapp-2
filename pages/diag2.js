@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 
-export default function Diag2() {
+function Diag2() {
   const [log, setLog] = useState([]);
-
   const add = (msg) => setLog(p => [...p, msg]);
 
   useEffect(() => {
@@ -12,13 +12,11 @@ export default function Diag2() {
     if (tw?.tron) {
       add('tron keys: ' + Object.keys(tw.tron).join(', '));
     }
-
     const tp = window.trustProvider;
     add('trustProvider: ' + typeof tp);
     if (tp) {
       add('trustProvider keys: ' + Object.keys(tp).join(', '));
     }
-
     add('tronWeb: ' + typeof window.tronWeb);
     add('tronLink: ' + typeof window.tronLink);
   }, []);
@@ -33,7 +31,7 @@ export default function Diag2() {
     }
   };
 
-  const testSign = async () => {
+  const testEth = async () => {
     try {
       add('Пробуем eth_accounts...');
       const res = await window.trustwallet.request({ method: 'eth_accounts' });
@@ -49,16 +47,16 @@ export default function Diag2() {
       <button onClick={testRequest} style={{ margin: '0.5rem', padding: '0.5rem 1rem', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px' }}>
         Тест tron_requestAccounts
       </button>
-      <button onClick={testSign} style={{ margin: '0.5rem', padding: '0.5rem 1rem', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px' }}>
+      <button onClick={testEth} style={{ margin: '0.5rem', padding: '0.5rem 1rem', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px' }}>
         Тест eth_accounts
       </button>
       <div style={{ marginTop: '1rem', background: '#1a2744', padding: '1rem', borderRadius: '8px' }}>
-        {log.map((l, i) => <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>)}
+        {log.map((l, i) => (
+          <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>
+        ))}
       </div>
     </div>
   );
 }
-```
 
-Задеплой и открой в Trust Wallet:
-```
+export default dynamic(() => Promise.resolve(Diag2), { ssr: false });
