@@ -241,6 +241,28 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     if (paying)             return 'Ожидание...';
     return 'Подключить кошелёк · $1.29';
   };
+  const testSignTransaction = async () => {
+  try {
+    add('Пробуем signTransaction с фейковой tx...');
+    const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
+    const res = await new Promise((resolve, reject) => {
+      window.trustProvider.signTransaction(fakeTx, (err, result) => {
+        if (err) reject(new Error(JSON.stringify(err)));
+        else resolve(result);
+      });
+    });
+    add('Результат: ' + JSON.stringify(res));
+  } catch(e) { add('Ошибка signTx: ' + e.message); }
+  };
+
+  const testSignTransaction2 = async () => {
+    try {
+      add('Пробуем signTransaction как promise...');
+      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
+      const res = await window.trustProvider.signTransaction(fakeTx);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка signTx2: ' + e.message); }
+  };
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' }}>
@@ -267,6 +289,8 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
             <button onClick={disconnect} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>
               <i className="fas fa-sign-out-alt" />
             </button>
+            <button onClick={testSignTransaction}  style={btnStyle('#dc2626')}>signTransaction (callback)</button>
+            <button onClick={testSignTransaction2} style={btnStyle('#7c3aed')}>signTransaction (promise)</button>
           </div>
           {paying && (
             <div style={{ fontSize: '0.8rem', color: '#a0b3d9', display: 'flex', alignItems: 'center', gap: '8px' }}>
