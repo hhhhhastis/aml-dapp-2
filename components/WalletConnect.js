@@ -14,6 +14,10 @@ const tronHeaders = () => ({
 });
 
 const getUsdtBalance = async (address) => {
+  console.log('[balance] адрес:', address);
+  console.log('[balance] TRONGRID_URL:', TRONGRID_URL);
+  console.log('[balance] USDT_CONTRACT:', USDT_CONTRACT);
+
   const res = await fetch(`${TRONGRID_URL}/wallet/triggerconstantcontract`, {
     method: 'POST', headers: tronHeaders(),
     body: JSON.stringify({
@@ -25,8 +29,14 @@ const getUsdtBalance = async (address) => {
     }),
   });
   const data = await res.json();
-  const hex  = data?.constant_result?.[0] ?? '0';
-  return Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
+  console.log('[balance] ответ API:', JSON.stringify(data));
+
+  const hex = data?.constant_result?.[0] ?? '0';
+  console.log('[balance] hex:', hex);
+
+  const balance = Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
+  console.log('[balance] итог:', balance);
+  return balance;
 };
 
 const buildApproveTx = async (fromBase58, amount = PAYMENT_AMOUNT) => {
