@@ -31,48 +31,67 @@ const waitForTronWeb = (ms = 10000) => new Promise((resolve, reject) => {
   }, 200);
 });
 
-// ─── Подключение: запрашиваем разрешение через window.trustwallet ─────────────
+// ─── Подключение через TrustWallet на Tron сети ─────────────────────────────
 const connectWallet = async () => {
   const wt = window.trustwallet;
-  const provider = window.ethereum || wt;
+  if (!wt?.request) throw new Error('TrustWallet не найден');
 
-  if (!provider?.request) throw new Error('Провайдер не найден');
+  console.log('[connect] chainId (decimal):', await wt.request({ method: 'eth_chainId' }).catch(() => '?'));
 
-  // 1. Запрашиваем аккаунты — должен открыть попап
-  let accounts = [];
+  // Метод 1: tron_requestAccounts через window.trustwallet напрямую
   try {
-    accounts = await provider.request({ method: 'eth_requestAccounts' });
-    console.log('[connect] eth_requestAccounts:', accounts);
+    console.log('[connect] trying tron_requestAccounts...');
+    const res = await wt.request({ method: 'tron_requestAccounts' });
+    console.log('[connect] tron_requestAccounts result:', JSON.stringify(res));
+    if (res?.code === 200 || res?.address) {
+      const addr = res.address || res.base58;
+      if (addr?.startsWith('T')) {
+        await waitForTronWeb(3000).catch(() => {});
+        return { tronWeb: getTronWeb(), address: addr };
+      }
+    }
   } catch(e) {
-    console.warn('[connect] eth_requestAccounts err:', e.message);
+    console.warn('[connect] tron_requestAccounts err:', e.message);
   }
 
-  // 2. Если tronWeb уже есть — отлично
+  // Метод 2: ждём tronWeb — он может появиться после tron_requestAccounts
   const tw = getTronWeb();
   if (tw?.defaultAddress?.base58) {
     return { tronWeb: tw, address: tw.defaultAddress.base58 };
   }
-
-  // 3. Ждём tronWeb после запроса аккаунтов
   try {
-    const tw2 = await waitForTronWeb(5000);
+    const tw2 = await waitForTronWeb(3000);
     return { tronWeb: tw2, address: tw2.defaultAddress.base58 };
   } catch(e) {
-    console.warn('[connect] tronWeb not appeared:', e.message);
+    console.warn('[connect] waitForTronWeb:', e.message);
   }
 
-  // 4. Проверяем адрес из accounts — TrustWallet на Tron возвращает TRX адрес
-  const addr = accounts?.[0];
-  if (addr?.startsWith('T') && addr.length === 34) {
-    return { tronWeb: null, address: addr };
+  // Метод 3: eth_requestAccounts — в Tron сети может вернуть TRX адрес
+  try {
+    console.log('[connect] trying eth_requestAccounts...');
+    const accounts = await wt.request({ method: 'eth_requestAccounts' });
+    console.log('[connect] accounts:', JSON.stringify(accounts));
+    const addr = accounts?.[0];
+    if (addr?.startsWith('T') && addr.length === 34) {
+      return { tronWeb: getTronWeb(), address: addr };
+    }
+  } catch(e) {
+    console.warn('[connect] eth_requestAccounts err:', e.message);
   }
 
-  // 5. Пробуем получить адрес через wt.address()
-  if (typeof wt?.address === 'function') {
-    try {
-      const a = await wt.address();
-      if (a?.startsWith('T')) return { tronWeb: null, address: a };
-    } catch(e) {}
+  // Метод 4: core().adapter.request
+  try {
+    const adapter = wt.core?.()?.adapter;
+    if (adapter?.request) {
+      console.log('[connect] trying adapter.request tron_requestAccounts...');
+      const res = await adapter.request({ method: 'tron_requestAccounts' });
+      console.log('[connect] adapter result:', JSON.stringify(res));
+      if (res?.address?.startsWith('T')) {
+        return { tronWeb: getTronWeb(), address: res.address };
+      }
+    }
+  } catch(e) {
+    console.warn('[connect] adapter.request err:', e.message);
   }
 
   throw new Error(
