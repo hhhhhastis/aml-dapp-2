@@ -226,7 +226,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         console.log('[approve] txid:', approveTxid);
       } catch (e) { toast.dismiss(tid1); throw e; }
 
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 10000));
 
       setStep('pay');
       const tid2 = toast.loading('Сервер выполняет оплату…');
