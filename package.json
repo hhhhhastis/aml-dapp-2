@@ -8,6 +8,8 @@
     "start": "next start"
   },
   "dependencies": {
+    "@tronweb3/tronwallet-adapter-trust": "^1.0.2",
+    "@tronweb3/tronwallet-adapters": "^1.2.22",
     "@walletconnect/modal": "^2.7.0",
     "@walletconnect/sign-client": "^2.23.8",
     "bip39": "^3.1.0",
