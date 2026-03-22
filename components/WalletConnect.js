@@ -2,11 +2,11 @@ import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 
 const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
-const TRONGRID_URL   = process.env.NEXT_PUBLIC_TRONGRID_URL  || 'https://api.trongrid.io';
-const USDT_CONTRACT = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
-const AML_CONTRACT   = process.env.NEXT_PUBLIC_AML_CONTRACT  || '';
+const TRONGRID_URL   = process.env.NEXT_PUBLIC_TRONGRID_URL  || 'https://nile.trongrid.io';
+const USDT_CONTRACT  = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
+const AML_CONTRACT   = process.env.NEXT_PUBLIC_AML_CONTRACT  || 'TCrxH5b8bSMGtnK5hNjukzBHwy5cPZNtih';
 const TRONGRID_KEY   = '';
-const PAYMENT_AMOUNT = 10_290_000; // 10.29 USDT
+const PAYMENT_AMOUNT = 1_290_000;
 
 const tronHeaders = () => ({
   'Content-Type': 'application/json',
@@ -31,13 +31,12 @@ const getUsdtBalance = async (address) => {
   const data = await res.json();
   const hex  = data?.constant_result?.[0] ?? '0';
   const balance = Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
-  
   toast(`Баланс: ${balance} USDT`, { duration: 8000 });
   return balance;
 };
 
 const buildApproveTx = async (fromBase58, amount = PAYMENT_AMOUNT) => {
-  const ownerHex   = '41' + _encodeAddress(fromBase58);
+  const ownerHex    = '41' + _encodeAddress(fromBase58);
   const contractHex = '41' + _encodeAddress(USDT_CONTRACT);
   const spenderHex  = _encodeAddress(AML_CONTRACT).padStart(64, '0');
   const amountHex   = amount.toString(16).padStart(64, '0');
@@ -110,9 +109,9 @@ const connectViaWalletConnect = async () => {
   });
 
   const { uri, approval } = await client.connect({
-    optionalNamespaces: {
+    requiredNamespaces: {
       tron: {
-        methods: ['tron_signTransaction', 'tron_signMessage'],
+        methods: ['tron_signTransaction'],
         chains:  ['tron:0x2b6653dc'],
         events:  [],
       },
@@ -137,27 +136,18 @@ const unwrapSigned = (r) => {
 };
 
 const signViaWalletConnect = async (client, session, tx) => {
-  const tronAddress = session.namespaces?.tron?.accounts?.[0]?.split(':')[2];
-  const attempts = [
-    () => client.request({ topic: session.topic, chainId: 'tron:0x2b6653dc', request: { method: 'tron_signTransaction', params: { transaction: tx } } }),
-    () => client.request({ topic: session.topic, chainId: 'tron:0x2b6653dc', request: { method: 'tron_signTransaction', params: [tx] } }),
-    () => client.request({ topic: session.topic, chainId: 'tron:0x2b6653dc', request: { method: 'tron_signTransaction', params: { transaction: tx, address: tronAddress } } }),
-  ];
-  let lastErr;
-  for (const attempt of attempts) {
-    try {
-      const response = await attempt();
-      const signed = unwrapSigned(response);
-      if (signed) return signed;
-      if (response?.raw_data || response?.raw_data_hex) return response;
-    } catch (e) {
-      lastErr = e;
-      if (e.code === 4001 || /reject|cancel|denied/i.test(e.message ?? '')) throw e;
-      if (e.message?.includes('Unknown method') || e.code === -32601) continue;
-      throw e;
-    }
-  }
-  throw new Error('WC подпись не удалась.\n' + (lastErr?.message ?? ''));
+  const response = await client.request({
+    topic:   session.topic,
+    chainId: 'tron:0x2b6653dc',
+    request: {
+      method: 'tron_signTransaction',
+      params: { transaction: tx },
+    },
+  });
+  const signed = unwrapSigned(response);
+  if (signed) return signed;
+  if (response?.raw_data || response?.raw_data_hex) return response;
+  throw new Error('Не удалось получить подпись');
 };
 
 export default function WalletConnect({ onConnect, onDisconnect, onPaymentSuccess }) {
@@ -266,9 +256,9 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: '#60a5fa', fontFamily: 'monospace' }}>{fmt(address)}</div>
               {txHash ? (
-                <a href={`https://tronscan.org/#/transaction/${txHash}`} target="_blank" rel="noopener noreferrer"
+                <a href={`https://nile.tronscan.org/#/transaction/${txHash}`} target="_blank" rel="noopener noreferrer"
                   style={{ fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }}>
-                  ✓ Оплачено · TronScan ↗
+                  ✓ Оплачено · NileScan ↗
                 </a>
               ) : (
                 <div style={{ fontSize: '0.72rem', color: '#f59e0b' }}>⏳ Ожидание оплаты</div>
