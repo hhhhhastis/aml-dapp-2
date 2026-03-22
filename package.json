@@ -8,11 +8,11 @@
     "start": "next start"
   },
   "dependencies": {
-    "@walletconnect/modal": "^2.7.0",
-    "@walletconnect/sign-client": "^2.23.8",
     "next": "14.2.35",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "@walletconnect/sign-client": "^2.11.0",
+    "@walletconnect/modal": "^2.6.0",
     "react-hot-toast": "^2.4.1"
   }
-}
+} 

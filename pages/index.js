@@ -20,7 +20,6 @@ export default function Home() {
 
   const handleConnect = (addr) => {
     setWalletAddress(addr);
-    // оплата будет запущена автоматически внутри WalletConnect
   };
 
   const handleDisconnect = () => {
