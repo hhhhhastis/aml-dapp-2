@@ -11,35 +11,139 @@ function Diag2() {
   });
 
   useEffect(() => {
-    add('trustwallet: ' + typeof window.trustwallet);
-    add('trustProvider: ' + typeof window.trustProvider);
+    const tw = window.trustwallet;
+    add('trustwallet: ' + typeof tw);
+    add('trustwallet.tron: ' + typeof tw?.tron);
+    if (tw?.tron) add('tron keys: ' + Object.keys(tw.tron).join(', '));
+    const tp = window.trustProvider;
+    add('trustProvider: ' + typeof tp);
+    if (tp) add('trustProvider keys: ' + Object.keys(tp).join(', '));
     add('tronWeb: ' + typeof window.tronWeb);
     add('tronLink: ' + typeof window.tronLink);
-    add('ethereum: ' + typeof window.ethereum);
-    add('tron: ' + typeof window.tron);
   }, []);
 
-  const testMetaMask = async () => {
+  const testGetAccounts = async () => {
     try {
-      add('ethereum: ' + typeof window.ethereum);
-      add('ethereum keys: ' + Object.keys(window.ethereum || {}).slice(0, 10).join(', '));
-      add('tron: ' + typeof window.tron);
-      add('isTron: ' + window.ethereum?.isTron);
+      add('Пробуем getAccounts (callback)...');
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.getAccounts((err, accounts) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(accounts);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
+      ]);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
 
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      add('eth accounts: ' + JSON.stringify(accounts));
+  const testGetAccounts2 = async () => {
+    try {
+      add('Пробуем getAccounts (promise)...');
+      const res = await window.trustProvider.getAccounts();
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
 
-      try {
-        const tron = await window.ethereum.request({ method: 'tron_requestAccounts' });
-        add('tron accounts: ' + JSON.stringify(tron));
-      } catch(e) { add('tron_requestAccounts ошибка: ' + e.message); }
+  const testEth = async () => {
+    try {
+      add('Пробуем eth_accounts...');
+      const res = await window.trustwallet.request({ method: 'eth_accounts' });
+      add('eth_accounts: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
+  const testInspect = () => {
+    try {
+      const tp = window.trustProvider;
+      add('trustProvider toString: ' + tp.toString());
+      add('getAccounts type: ' + typeof tp.getAccounts);
+      add('signTransaction type: ' + typeof tp.signTransaction);
+      const allKeys = [];
+      for (let key in tp) allKeys.push(key);
+      add('all keys (for..in): ' + allKeys.join(', '));
+      const proto = Object.getPrototypeOf(tp);
+      add('prototype keys: ' + Object.getOwnPropertyNames(proto).join(', '));
+    } catch(e) { add('Ошибка inspect: ' + e.message); }
+  };
+
+  const testCallbackFixed = async () => {
+    try {
+      add('Пробуем callback с таймаутом...');
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.getAccounts((err, accounts) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(accounts);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
+      ]);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
+  const testSignTransaction = async () => {
+    try {
+      add('Пробуем signTransaction (callback)...');
+      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.signTransaction(fakeTx, (err, result) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(result);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 10s')), 10000))
+      ]);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
+  const testSignTransaction2 = async () => {
+    try {
+      add('Пробуем signTransaction (promise)...');
+      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
+      const res = await window.trustProvider.signTransaction(fakeTx);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
+  const testRequestFirst = async () => {
+    try {
+      add('Шаг 1: запрашиваем eth_requestAccounts...');
+      await window.trustwallet.request({ method: 'eth_requestAccounts' });
+      add('Шаг 1 ОК');
+
+      add('Шаг 2: ждём 1 секунду...');
+      await new Promise(r => setTimeout(r, 1000));
+
+      add('Шаг 3: пробуем getAccounts...');
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.getAccounts((err, acc) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(acc);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
+      ]);
+      add('getAccounts результат: ' + JSON.stringify(res));
     } catch(e) { add('Ошибка: ' + e.message); }
   };
 
   return (
     <div style={{ padding: '1rem', background: '#0f192d', minHeight: '100vh', color: '#fff', fontFamily: 'monospace' }}>
-      <h2>🔬 Диагностика MetaMask</h2>
-      <button onClick={testMetaMask} style={btnStyle('#e97316')}>Тест MetaMask TRON</button>
+      <h2>🔬 Диагностика Trust Wallet</h2>
+      <button onClick={testGetAccounts}     style={btnStyle('#f59e0b')}>getAccounts (callback)</button>
+      <button onClick={testGetAccounts2}    style={btnStyle('#8b5cf6')}>getAccounts (promise)</button>
+      <button onClick={testEth}             style={btnStyle('#10b981')}>eth_accounts</button>
+      <button onClick={testInspect}         style={btnStyle('#e11d48')}>Inspect trustProvider</button>
+      <button onClick={testCallbackFixed}   style={btnStyle('#0891b2')}>getAccounts + timeout</button>
+      <button onClick={testSignTransaction}  style={btnStyle('#dc2626')}>signTransaction (callback)</button>
+      <button onClick={testSignTransaction2} style={btnStyle('#7c3aed')}>signTransaction (promise)</button>
+      <button onClick={testRequestFirst}     style={btnStyle('#059669')}>requestAccounts → getAccounts</button>
       <div style={{ marginTop: '1rem', background: '#1a2744', padding: '1rem', borderRadius: '8px' }}>
         {log.map((l, i) => (
           <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>
