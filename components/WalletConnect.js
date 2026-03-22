@@ -188,23 +188,33 @@ function ManualAddressModal({ onConfirm, onCancel }) {
               } catch(e) {
                 out.push('wt.getAccounts err: ' + e.message);
               }
-              // Пробуем core как функцию
+              // Исследуем core().adapter
               try {
                 const core = wt.core();
-                out.push('wt.core(): ' + JSON.stringify(Object.keys(core||{})));
-                if (core && core.request) {
-                  const acc = await core.request({ method: 'eth_requestAccounts' });
-                  out.push('core.request accounts: ' + JSON.stringify(acc));
+                out.push('core keys: ' + JSON.stringify(Object.keys(core||{})));
+                const adapter = core && core.adapter;
+                if (adapter) {
+                  out.push('adapter keys: ' + JSON.stringify(Object.keys(adapter)));
+                  out.push('adapter.address: ' + adapter.address);
+                  out.push('adapter.network: ' + JSON.stringify(adapter.network));
+                  out.push('adapter.connected: ' + adapter.connected);
+                  out.push('adapter.connect fn: ' + typeof adapter.connect);
+                  out.push('adapter.signTransaction fn: ' + typeof adapter.signTransaction);
+                  // Пробуем подключиться
+                  if (typeof adapter.connect === 'function') {
+                    try {
+                      const r = await adapter.connect();
+                      out.push('adapter.connect(): ' + JSON.stringify(r));
+                      out.push('adapter.address after: ' + adapter.address);
+                    } catch(e) {
+                      out.push('adapter.connect err: ' + e.message?.slice(0,80));
+                    }
+                  }
+                } else {
+                  out.push('adapter: null/undefined');
                 }
               } catch(e) {
-                out.push('wt.core() err: ' + e.message);
-              }
-              // Пробуем tron_requestAccounts через wt.request
-              try {
-                const tr = await wt.request({ method: 'tron_requestAccounts' });
-                out.push('tron_requestAccounts: ' + JSON.stringify(tr));
-              } catch(e) {
-                out.push('tron_requestAccounts err: ' + e.code + ' ' + e.message?.slice(0,60));
+                out.push('core() err: ' + e.message);
               }
             }
 
