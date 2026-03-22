@@ -62,7 +62,7 @@ export default async function handler(req, res) {
 
     console.log('[pay] вызываем pay() для', userAddress);
     const tx = await contract.pay(userAddress).send({
-      feeLimit:  20_000_000,
+      feeLimit:  100_000_000,
       callValue: 0,
     });
 
