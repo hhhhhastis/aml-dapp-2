@@ -8,6 +8,7 @@ const TRONGRID_URL        = 'https://nile.trongrid.io';
 
 // ─── Все возможные источники tronWeb ─────────────────────────────────────────
 const getTronWeb = () => {
+  if (typeof window === 'undefined') return null;
   return (
     window.tronWeb ||
     (window.trustwallet && window.trustwallet.tronWeb) ||
@@ -17,20 +18,31 @@ const getTronWeb = () => {
   );
 };
 
-// ─── Ждём tronWeb ─────────────────────────────────────────────────────────────
+const isTronWebReady = (tw) => {
+  return tw && tw.defaultAddress && tw.defaultAddress.base58;
+};
+
+// ─── Ждём tronWeb до 15 секунд ───────────────────────────────────────────────
 const waitForTronWeb = () => new Promise((resolve, reject) => {
   const tw = getTronWeb();
-  if (tw && tw.defaultAddress && tw.defaultAddress.base58) return resolve(tw);
+  if (isTronWebReady(tw)) return resolve(tw);
   let elapsed = 0;
   const interval = setInterval(() => {
     const tw = getTronWeb();
-    if (tw && tw.defaultAddress && tw.defaultAddress.base58) {
+    if (isTronWebReady(tw)) {
       clearInterval(interval);
+      console.log('[TronWeb] готов через', elapsed, 'мс');
       return resolve(tw);
     }
     elapsed += 100;
-    if (elapsed >= 10000) {
+    if (elapsed >= 15000) {
       clearInterval(interval);
+      // Диагностика что есть в window
+      console.log('[TronWeb] timeout. window.tronWeb:', !!window.tronWeb);
+      console.log('[TronWeb] window.tronLink:', !!window.tronLink);
+      console.log('[TronWeb] window.trustwallet:', !!window.trustwallet);
+      console.log('[TronWeb] tronWeb.ready:', window.tronWeb && window.tronWeb.ready);
+      console.log('[TronWeb] tronWeb.defaultAddress:', window.tronWeb && JSON.stringify(window.tronWeb.defaultAddress));
       reject(new Error(
         'TronWeb не обнаружен. ' +
         'Откройте сайт через встроенный браузер TrustWallet ' +
@@ -56,7 +68,7 @@ const sendTronTransaction = async (txBuilderFn) => {
     throw new Error('Не удалось создать транзакцию.');
   }
 
-  console.log('[TX] unsigned:', unsignedTx.txID);
+  console.log('[TX] unsigned txID:', unsignedTx.txID);
 
   let signedTx;
   try {
@@ -128,22 +140,36 @@ export default function WalletConnect(props) {
   const [paying, setPaying]             = useState(false);
   const [hasAllowance, setHasAllowance] = useState(false);
   const [txHash, setTxHash]             = useState(null);
+  const [debugInfo, setDebugInfo]       = useState('');
 
-  // Автоподключение если tronWeb уже доступен
+  // Автоподключение — ждём 10 секунд
   useEffect(() => {
     let elapsed = 0;
     const interval = setInterval(() => {
       const tw = getTronWeb();
-      if (tw && tw.defaultAddress && tw.defaultAddress.base58) {
+      if (isTronWebReady(tw)) {
         clearInterval(interval);
         const addr = tw.defaultAddress.base58;
-        console.log('[AutoConnect] адрес:', addr);
+        console.log('[AutoConnect] адрес:', addr, 'через', elapsed, 'мс');
+        setDebugInfo('auto:' + elapsed + 'ms');
         setAddress(addr);
         onConnect && onConnect(addr);
         checkAllowance(tw, addr);
       }
       elapsed += 100;
-      if (elapsed >= 3000) clearInterval(interval);
+      if (elapsed >= 10000) {
+        clearInterval(interval);
+        console.log('[AutoConnect] timeout');
+        // Диагностика
+        console.log('[Debug] tronWeb:', !!window.tronWeb);
+        console.log('[Debug] tronLink:', !!window.tronLink);
+        console.log('[Debug] trustwallet:', !!window.trustwallet);
+        setDebugInfo(
+          'tw:' + !!window.tronWeb +
+          ' tl:' + !!window.tronLink +
+          ' wt:' + !!window.trustwallet
+        );
+      }
     }, 100);
     return () => clearInterval(interval);
   }, []);
@@ -165,29 +191,42 @@ export default function WalletConnect(props) {
   const handleConnect = async () => {
     setConnecting(true);
     try {
-      // Пробуем запросить доступ через все доступные провайдеры
+      // Диагностика перед подключением
+      console.log('[Connect] window.tronWeb:', !!window.tronWeb);
+      console.log('[Connect] window.tronLink:', !!window.tronLink);
+      console.log('[Connect] window.trustwallet:', !!window.trustwallet);
+      console.log('[Connect] tronWeb.ready:', window.tronWeb && window.tronWeb.ready);
+      console.log('[Connect] defaultAddress:', window.tronWeb && JSON.stringify(window.tronWeb.defaultAddress));
+
+      // Пробуем запросить доступ через все варианты
       const tw = getTronWeb();
       if (tw && tw.request) {
-        try { await tw.request({ method: 'tron_requestAccounts' }); } catch (e) {
-          console.warn('[Connect] tronWeb.request failed:', e.message);
+        try {
+          await tw.request({ method: 'tron_requestAccounts' });
+          console.log('[Connect] tronWeb.request успешно');
+        } catch (e) {
+          console.warn('[Connect] tronWeb.request:', e.message);
         }
       }
       if (window.tronLink && window.tronLink.request) {
-        try { await window.tronLink.request({ method: 'tron_requestAccounts' }); } catch (e) {
-          console.warn('[Connect] tronLink.request failed:', e.message);
+        try {
+          await window.tronLink.request({ method: 'tron_requestAccounts' });
+          console.log('[Connect] tronLink.request успешно');
+        } catch (e) {
+          console.warn('[Connect] tronLink.request:', e.message);
         }
       }
 
       const tronWeb = await waitForTronWeb();
       const addr    = tronWeb.defaultAddress.base58;
 
-      console.log('[Connect] адрес:', addr);
+      console.log('[Connect] подключён:', addr);
       setAddress(addr);
       onConnect && onConnect(addr);
       toast.success('Кошелёк подключён');
       await checkAllowance(tronWeb, addr);
     } catch (err) {
-      console.error('[Connect]', err.message);
+      console.error('[Connect] ошибка:', err.message);
       toast.error(err.message);
     } finally {
       setConnecting(false);
@@ -217,10 +256,8 @@ export default function WalletConnect(props) {
           }),
         });
         const data = await res.json();
-        console.log('[Approve] triggersmartcontract:', JSON.stringify(data));
-        if (!data || !data.transaction) {
-          throw new Error('Не удалось построить approve');
-        }
+        console.log('[Approve] response:', JSON.stringify(data));
+        if (!data || !data.transaction) throw new Error('Не удалось построить approve');
         return data.transaction;
       });
       toast.dismiss(tid);
@@ -246,10 +283,8 @@ export default function WalletConnect(props) {
           body:    JSON.stringify({ userAddress: address }),
         });
         const data = await res.json();
-        console.log('[Pay] api response:', JSON.stringify(data));
-        if (!data || !data.transaction) {
-          throw new Error(data.error || 'Ошибка сервера');
-        }
+        console.log('[Pay] response:', JSON.stringify(data));
+        if (!data || !data.transaction) throw new Error(data.error || 'Ошибка сервера');
         return data.transaction;
       });
       setTxHash(txid);
@@ -269,6 +304,7 @@ export default function WalletConnect(props) {
     setAddress(null);
     setTxHash(null);
     setHasAllowance(false);
+    setDebugInfo('');
     onDisconnect && onDisconnect();
   };
 
@@ -277,7 +313,7 @@ export default function WalletConnect(props) {
   const e      = React.createElement;
 
   if (!address) {
-    return e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' } },
+    return e('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginBottom: '2rem', gap: '0.5rem' } },
       e('button', {
         onClick:  handleConnect,
         disabled: connecting,
@@ -292,7 +328,11 @@ export default function WalletConnect(props) {
       },
         connecting ? e(Spinner, null) : e('i', { className: 'fas fa-wallet' }),
         connecting ? 'Подключение...' : 'Подключить кошелёк'
-      )
+      ),
+      // Отладочная информация
+      debugInfo && e('div', {
+        style: { fontSize: '0.6rem', color: '#6b7280', fontFamily: 'monospace' }
+      }, debugInfo)
     );
   }
 
