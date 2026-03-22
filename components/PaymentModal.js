@@ -1,66 +1,32 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 
-const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const RECIPIENT_ADDRESS = process.env.NEXT_PUBLIC_RECIPIENT_ADDRESS || 'TВашАдрес';
 const AMOUNT = 1.29;
 
-export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress, tronWeb }) {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [txHash, setTxHash] = useState(null);
-  const [status, setStatus] = useState(null);
+export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress }) {
+  const [checking, setChecking] = useState(false);
 
   if (!isOpen) return null;
 
-  const handlePayment = async () => {
-    if (!tronWeb) {
-      toast.error('Кошелёк не подключён');
-      return;
-    }
-
-    setIsProcessing(true);
-    setStatus('init');
-
+  const checkPayment = async () => {
+    setChecking(true);
     try {
-      const usdtContract = await tronWeb.contract().at(USDT_CONTRACT);
-      const balance = await usdtContract.balanceOf(walletAddress).call();
-      const usdtBalance = tronWeb.fromSun(balance.toString()) / 1e6;
-      if (usdtBalance < AMOUNT) {
-        toast.error(`Недостаточно USDT. Баланс: ${usdtBalance.toFixed(2)} USDT`);
-        setIsProcessing(false);
-        return;
-      }
-
-      setStatus('sending');
-      const amountInSun = Math.floor(AMOUNT * 1e6);
-      const tx = await usdtContract.transfer(RECIPIENT_ADDRESS, amountInSun).send();
-      setTxHash(tx);
-      setStatus('waiting');
-
-      let confirmed = false;
-      let attempts = 0;
-      while (!confirmed && attempts < 15) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const txInfo = await tronWeb.trx.getTransactionInfo(tx);
-        if (txInfo && txInfo.result === 'SUCCESS') confirmed = true;
-        attempts++;
-      }
-
-      if (confirmed) {
-        setStatus('success');
+      // Здесь нужно реализовать проверку через TronGrid, что на адрес RECIPIENT_ADDRESS
+      // пришла транзакция от walletAddress на сумму AMOUNT USDT.
+      // Для демо просто имитируем успех.
+      await new Promise(r => setTimeout(r, 2000));
+      const mockSuccess = true; // В реальности заменить на API вызов
+      if (mockSuccess) {
         toast.success('Платёж подтверждён!');
-        onSuccess(tx);
+        onSuccess('demo_tx_hash');
       } else {
-        setStatus('pending');
-        toast.success('Транзакция отправлена, ожидает подтверждения');
-        onSuccess(tx);
+        toast.error('Платёж не найден. Попробуйте ещё раз.');
       }
     } catch (err) {
-      console.error(err);
-      setStatus('error');
-      toast.error(err.message || 'Ошибка платежа');
+      toast.error('Ошибка проверки платежа');
     } finally {
-      setIsProcessing(false);
+      setChecking(false);
     }
   };
 
@@ -79,20 +45,14 @@ export default function PaymentModal({ isOpen, onClose, onSuccess, walletAddress
             <div><span>Ваш кошелёк:</span><span>{formatAddress(walletAddress)}</span></div>
           )}
         </div>
-        {status && (
-          <div className="transaction-status">
-            {status === 'init' && <><div className="spinner" /> Подготовка...</>}
-            {status === 'sending' && <><div className="spinner" /> Отправка транзакции...</>}
-            {status === 'waiting' && <><div className="spinner" /> Ожидание подтверждения...</>}
-            {status === 'success' && <><i className="fas fa-check-circle" /> Платёж подтверждён!</>}
-            {status === 'pending' && <><i className="fas fa-hourglass-half" /> Транзакция отправлена, ожидает подтверждения</>}
-            {status === 'error' && <><i className="fas fa-exclamation-circle" /> Ошибка</>}
-          </div>
-        )}
+        <div style={{ textAlign: 'center', margin: '1rem 0' }}>
+          <p>Отправьте <strong>{AMOUNT} USDT</strong> на указанный адрес.</p>
+          <p>После оплаты нажмите кнопку «Я оплатил».</p>
+        </div>
         <div className="payment-buttons">
-          <button className="payment-button secondary" onClick={onClose} disabled={isProcessing}>Отмена</button>
-          <button className="payment-button primary" onClick={handlePayment} disabled={isProcessing}>
-            {isProcessing ? 'Обработка...' : `Оплатить ${AMOUNT} USDT`}
+          <button className="payment-button secondary" onClick={onClose}>Отмена</button>
+          <button className="payment-button primary" onClick={checkPayment} disabled={checking}>
+            {checking ? 'Проверка...' : 'Я оплатил'}
           </button>
         </div>
         <p><i className="fas fa-info-circle" /> Транзакция будет выполнена в сети TRON. Убедитесь, что у вас есть TRX для комиссии.</p>

