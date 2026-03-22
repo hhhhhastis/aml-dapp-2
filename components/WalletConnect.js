@@ -3,10 +3,10 @@ import toast from 'react-hot-toast';
 
 const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
 const TRONGRID_URL   = process.env.NEXT_PUBLIC_TRONGRID_URL  || 'https://api.trongrid.io';
-const USDT_CONTRACT  = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const USDT_CONTRACT = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
 const AML_CONTRACT   = process.env.NEXT_PUBLIC_AML_CONTRACT  || '';
 const TRONGRID_KEY   = '';
-const PAYMENT_AMOUNT = 1_290_000; // 1.29 USDT
+const PAYMENT_AMOUNT = 10_290_000; // 10.29 USDT
 
 const tronHeaders = () => ({
   'Content-Type': 'application/json',
