@@ -82,71 +82,69 @@ function _encodeAddress(base58Addr) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ОПРЕДЕЛЕНИЕ ПРОВАЙДЕРА
+// ПРОВАЙДЕР
 //
-// Диагностика показала точную картину:
-//   window.trustProvider              → есть, ключи: signTransaction, getAccounts
-//   window.trustProvider.signTransaction → function  ← TRON подпись здесь
-//   window.trustProvider.getAccounts     → function  ← TRON адрес здесь
-//   window.trustwallet.tron           → false (TRON нет в trustwallet)
-//   window.trustwalletTon             → TON, не TRON (разные сети!)
+// ВАЖНО: читаем window.trustProvider напрямую в момент вызова,
+// не кэшируем в переменную — иначе получаем undefined.
+//
+// Диагностика подтвердила:
+//   window.trustProvider.getAccounts    → function  ✓
+//   window.trustProvider.signTransaction → function  ✓
 // ══════════════════════════════════════════════════════════════════════════════
 
-const getTronProvider = () => {
+// Возвращает строку-тип найденного провайдера или null
+const detectProviderType = () => {
   if (typeof window === 'undefined') return null;
-
-  // ★ Правильный провайдер: window.trustProvider (найдено диагностикой)
-  if (window.trustProvider?.getAccounts) {
-    return { type: 'trustProvider', obj: window.trustProvider };
-  }
-
-  // Старые варианты — fallback для других версий TrustWallet
-  if (window.trustwallet?.tron?.request) return { type: 'trustwallet', obj: window.trustwallet.tron };
-  if (window.trustWallet?.tron?.request) return { type: 'trustwallet', obj: window.trustWallet.tron };
-  if (window.tronLink?.request)          return { type: 'tronlink',    obj: window.tronLink };
-
+  if (typeof window.trustProvider?.getAccounts === 'function')   return 'trustProvider';
+  if (typeof window.trustwallet?.tron?.request === 'function')   return 'trustwallet';
+  if (typeof window.trustWallet?.tron?.request === 'function')   return 'trustWallet';
+  if (typeof window.tronLink?.request === 'function')            return 'tronlink';
   return null;
 };
 
-const waitForTronProvider = (ms = 4000) => new Promise((resolve) => {
-  const immediate = getTronProvider();
+// Ждём появления провайдера до ms миллисекунд
+const waitForProviderType = (ms = 4000) => new Promise((resolve) => {
+  const immediate = detectProviderType();
   if (immediate) return resolve(immediate);
   let elapsed = 0;
   const t = setInterval(() => {
-    const found = getTronProvider();
+    const found = detectProviderType();
     if (found)                       { clearInterval(t); resolve(found); }
     else if ((elapsed += 200) >= ms) { clearInterval(t); resolve(null); }
   }, 200);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДКЛЮЧЕНИЕ
+// ПОДКЛЮЧЕНИЕ — читаем window.trustProvider свежо при каждом вызове
 // ══════════════════════════════════════════════════════════════════════════════
 
-const connectViaTronProvider = async (provider) => {
+const connectViaProvider = async (providerType) => {
   let address = null;
 
-  if (provider.type === 'trustProvider') {
-    // window.trustProvider.getAccounts() — возвращает TRON адреса
-    const accounts = await provider.obj.getAccounts();
-    if (Array.isArray(accounts) && accounts[0]) {
-      address = accounts[0];
-    } else if (typeof accounts === 'string') {
-      address = accounts;
-    }
-  } else {
-    // Стандартный request для других провайдеров
-    const result = await provider.obj.request({ method: 'tron_requestAccounts' });
-    if (Array.isArray(result) && result[0])          address = result[0];
-    else if (result?.address)                        address = result.address;
-    else if (result?.code === 200 || result?.code === 0) {
-      address = await new Promise((resolve) => {
-        let n = 0;
-        const t = setInterval(() => {
-          const addr = provider.obj.defaultAddress?.base58 || window.tronWeb?.defaultAddress?.base58;
-          if (addr || ++n > 20) { clearInterval(t); resolve(addr ?? null); }
-        }, 100);
-      });
+  if (providerType === 'trustProvider') {
+    // Читаем window.trustProvider напрямую здесь — не из кэша
+    const tp = window.trustProvider;
+    if (!tp) throw new Error('window.trustProvider недоступен');
+
+    const accounts = await tp.getAccounts();
+    if (Array.isArray(accounts) && accounts[0])  address = accounts[0];
+    else if (typeof accounts === 'string')        address = accounts;
+    else if (accounts?.address)                   address = accounts.address;
+
+  } else if (providerType === 'trustwallet') {
+    const result = await window.trustwallet.tron.request({ method: 'tron_requestAccounts' });
+    address = _extractAddress(result);
+
+  } else if (providerType === 'trustWallet') {
+    const result = await window.trustWallet.tron.request({ method: 'tron_requestAccounts' });
+    address = _extractAddress(result);
+
+  } else if (providerType === 'tronlink') {
+    const result = await window.tronLink.request({ method: 'tron_requestAccounts' });
+    if (result?.code === 200 || result?.code === 0) {
+      address = await _waitDefaultAddress(2000);
+    } else {
+      address = _extractAddress(result);
     }
   }
 
@@ -154,31 +152,63 @@ const connectViaTronProvider = async (provider) => {
   return address;
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ
-// ══════════════════════════════════════════════════════════════════════════════
-
-const unwrapSigned = (response) => {
-  if (!response) return null;
-  if (response.signature || response.txID) return response;
-  if (response.result?.signature || response.result?.txID) return response.result;
+const _extractAddress = (result) => {
+  if (Array.isArray(result) && result[0]) return result[0];
+  if (typeof result === 'string')         return result;
+  if (result?.address)                    return result.address;
   return null;
 };
 
-const signViaTronProvider = async (provider, tx) => {
-  if (provider.type === 'trustProvider') {
-    // window.trustProvider.signTransaction(tx) — прямой вызов без request
-    const response = await provider.obj.signTransaction(tx);
+const _waitDefaultAddress = (ms) => new Promise((resolve) => {
+  let n = 0;
+  const t = setInterval(() => {
+    const addr = window.tronLink?.defaultAddress?.base58 || window.tronWeb?.defaultAddress?.base58;
+    if (addr || ++n > ms / 100) { clearInterval(t); resolve(addr ?? null); }
+  }, 100);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ПОДПИСЬ — читаем window.trustProvider свежо при каждом вызове
+// ══════════════════════════════════════════════════════════════════════════════
+
+const unwrapSigned = (r) => {
+  if (!r) return null;
+  if (r.signature || r.txID) return r;
+  if (r.result?.signature || r.result?.txID) return r.result;
+  return null;
+};
+
+const signViaProvider = async (providerType, tx) => {
+  if (providerType === 'trustProvider') {
+    // Читаем window.trustProvider напрямую
+    const tp = window.trustProvider;
+    if (!tp) throw new Error('window.trustProvider недоступен при подписи');
+
+    const response = await tp.signTransaction(tx);
     const signed   = unwrapSigned(response);
     if (signed) return signed;
-    throw new Error('trustProvider.signTransaction не вернул подписанную транзакцию.');
+
+    // Если вернул что-то без signature — может быть уже подписанная tx
+    if (response?.raw_data || response?.raw_data_hex) return response;
+
+    throw new Error('trustProvider.signTransaction вернул неожиданный ответ: ' + JSON.stringify(response));
   }
 
   // Для других провайдеров — перебираем форматы params
+  const getProvider = () => {
+    if (providerType === 'trustwallet') return window.trustwallet?.tron;
+    if (providerType === 'trustWallet') return window.trustWallet?.tron;
+    if (providerType === 'tronlink')    return window.tronLink;
+    return null;
+  };
+
+  const prov = getProvider();
+  if (!prov?.request) throw new Error('Провайдер недоступен при подписи');
+
   const attempts = [
-    () => provider.obj.request({ method: 'tron_signTransaction', params: { transaction: tx } }),
-    () => provider.obj.request({ method: 'tron_signTransaction', params: [tx] }),
-    () => provider.obj.request({ method: 'tron_signTransaction', params: tx }),
+    () => prov.request({ method: 'tron_signTransaction', params: { transaction: tx } }),
+    () => prov.request({ method: 'tron_signTransaction', params: [tx] }),
+    () => prov.request({ method: 'tron_signTransaction', params: tx }),
   ];
 
   let lastErr;
@@ -264,7 +294,8 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [paying,     setPaying]     = useState(false);
   const [txHash,     setTxHash]     = useState(null);
 
-  const sessionRef = useRef({ type: null, provider: null, client: null, session: null });
+  // Храним только тип провайдера и WC данные — не сам объект провайдера
+  const sessionRef = useRef({ type: null, client: null, session: null });
 
   const fmt    = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
   const isBusy = connecting || paying;
@@ -273,11 +304,11 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     setConnecting(true);
     let addr = null;
     try {
-      const tronProvider = await waitForTronProvider(4000);
+      const providerType = await waitForProviderType(4000);
 
-      if (tronProvider) {
-        addr = await connectViaTronProvider(tronProvider);
-        sessionRef.current = { type: 'tron_provider', provider: tronProvider };
+      if (providerType) {
+        addr = await connectViaProvider(providerType);
+        sessionRef.current = { type: providerType, client: null, session: null };
       } else {
         const wc = await connectViaWalletConnect();
         addr = wc.address;
@@ -314,10 +345,11 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       const tx = await buildTransferTx(addr, PAYMENT_TO, PAYMENT_AMOUNT);
 
       let signedTx;
-      if (sess.type === 'tron_provider') {
-        signedTx = await signViaTronProvider(sess.provider, tx);
-      } else {
+      if (sess.type === 'walletconnect') {
         signedTx = await signViaWalletConnect(sess.client, sess.session, tx);
+      } else {
+        // Читаем провайдер свежо — не из кэша
+        signedTx = await signViaProvider(sess.type, tx);
       }
 
       const txid = await broadcastTx(signedTx);
