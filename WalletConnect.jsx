@@ -3,16 +3,11 @@ import toast from 'react-hot-toast';
 
 // ─── НАСТРОЙКА ────────────────────────────────────────────────────────────────
 const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
-const TRONGRID_URL   = 'https://nile.trongrid.io';             // ← тестнет Nile
+const TRONGRID_URL   = 'https://api.trongrid.io';
 const TRONGRID_KEY   = '';
-const USDT_CONTRACT  = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj'; // ← USDT на Nile
-const AML_CONTRACT   = 'THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc'; // ← твой контракт
+const USDT_CONTRACT  = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const AML_CONTRACT   = 'ВСТАВЬ_АДРЕС_ПОСЛЕ_ДЕПЛОЯ';  // ← сюда адрес из deployed.json
 const PAYMENT_AMOUNT = 1_290_000; // 1.29 USDT (6 decimals)
-// ─────────────────────────────────────────────────────────────────────────────
-// После тестирования замени на mainnet:
-//   TRONGRID_URL  = 'https://api.trongrid.io'
-//   USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
-//   AML_CONTRACT  = 'адрес после деплоя на mainnet'
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -40,7 +35,7 @@ const getUsdtBalance = async (address) => {
   return Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
 };
 
-// Шаг 1 — USDT.approve(AML_CONTRACT, PAYMENT_AMOUNT)
+// Шаг 1 — approve(AML_CONTRACT, PAYMENT_AMOUNT)
 const buildApproveTx = async (fromBase58) => {
   const ownerHex    = '41' + _encodeAddress(fromBase58);
   const contractHex = '41' + _encodeAddress(USDT_CONTRACT);
@@ -280,7 +275,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [address,    setAddress]    = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [paying,     setPaying]     = useState(false);
-  const [step,       setStep]       = useState('');
+  const [step,       setStep]       = useState(''); // 'approve' | 'pay' | ''
   const [txHash,     setTxHash]     = useState(null);
 
   const sessionRef = useRef({ type: null, provider: null, client: null, session: null });
@@ -288,6 +283,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const fmt    = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
   const isBusy = connecting || paying;
 
+  // Подписываем и бродкастим одну tx
   const signAndBroadcast = async (tx) => {
     const sess = sessionRef.current;
     let signed;
@@ -299,6 +295,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     return broadcastTx(signed);
   };
 
+  // Флоу: approve → 3с пауза → pay()
   const sendPayment = async (addr) => {
     if (!sessionRef.current.type) throw new Error('Кошелёк не подключён.');
     setPaying(true);
@@ -307,17 +304,17 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       const balance = await getUsdtBalance(addr);
       const needed  = PAYMENT_AMOUNT / 1_000_000;
       if (balance < needed) {
-        throw new Error(`Недостаточно USDT.\nНужно: ${needed.toFixed(2)} · Доступно: ${balance.toFixed(6)}`);
+        throw new Error(`Недостаточно USDT.\nНужно: ${needed.toFixed(2)} · Доступно: ${balance.toFixed(2)}`);
       }
 
       // Шаг 1 — approve
       setStep('approve');
       const tid1 = toast.loading('Шаг 1/2 — подпиши approve в кошельке…');
       try {
-        const approveTx   = await buildApproveTx(addr);
+        const approveTx  = await buildApproveTx(addr);
         const approveTxid = await signAndBroadcast(approveTx);
         toast.dismiss(tid1);
-        toast.success('Approve отправлен ✓', { duration: 3000 });
+        toast.success(`Approve отправлен ✓`, { duration: 3000 });
         console.log('[approve] txid:', approveTxid);
       } catch (e) {
         toast.dismiss(tid1);
@@ -381,7 +378,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     }
   };
 
-  const retryPayment     = async () => { if (address) try { await sendPayment(address); } catch(_){} };
+  const retryPayment  = async () => { if (address) try { await sendPayment(address); } catch(_){} };
   const handleDisconnect = () => { setAddress(null); setTxHash(null); setStep(''); onDisconnect?.(); };
 
   const disconnect = () => {
@@ -416,9 +413,9 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: '#60a5fa', fontFamily: 'monospace' }}>{fmt(address)}</div>
               {txHash ? (
-                <a href={`https://nile.tronscan.org/#/transaction/${txHash}`} target="_blank" rel="noopener noreferrer"
+                <a href={`https://tronscan.org/#/transaction/${txHash}`} target="_blank" rel="noopener noreferrer"
                   style={{ fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }}>
-                  ✓ Оплачено · NileScan ↗
+                  ✓ Оплачено · TronScan ↗
                 </a>
               ) : (
                 <div style={{ fontSize: '0.72rem', color: '#f59e0b' }}>⏳ Ожидание оплаты</div>
