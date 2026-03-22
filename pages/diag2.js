@@ -21,6 +21,31 @@ function Diag2() {
     add('tronLink: ' + typeof window.tronLink);
   }, []);
 
+  const testGetAccounts = async () => {
+  try {
+    add('Пробуем trustProvider.getAccounts()...');
+    const res = await new Promise((resolve, reject) => {
+      window.trustProvider.getAccounts((err, accounts) => {
+        if (err) reject(err);
+        else resolve(accounts);
+      });
+    });
+    add('Результат: ' + JSON.stringify(res));
+  } catch(e) {
+    add('Ошибка: ' + e.message);
+  }
+  };
+
+    const testGetAccounts2 = async () => {
+      try {
+        add('Пробуем trustProvider.getAccounts() как promise...');
+        const res = await window.trustProvider.getAccounts();
+        add('Результат: ' + JSON.stringify(res));
+      } catch(e) {
+        add('Ошибка2: ' + e.message);
+      }
+    };
+
   const testRequest = async () => {
     try {
       add('Пробуем tron_requestAccounts...');
@@ -41,6 +66,8 @@ function Diag2() {
     }
   };
 
+  
+
   return (
     <div style={{ padding: '1rem', background: '#0f192d', minHeight: '100vh', color: '#fff', fontFamily: 'monospace' }}>
       <h2>🔬 Диагностика Trust Wallet</h2>
@@ -51,6 +78,12 @@ function Diag2() {
         Тест eth_accounts
       </button>
       <div style={{ marginTop: '1rem', background: '#1a2744', padding: '1rem', borderRadius: '8px' }}>
+      <button onClick={testGetAccounts} style={btnStyle('#f59e0b')}>
+          getAccounts (callback)
+        </button>
+        <button onClick={testGetAccounts2} style={btnStyle('#8b5cf6')}>
+          getAccounts (promise)
+        </button>
         {log.map((l, i) => (
           <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>
         ))}
