@@ -84,22 +84,20 @@ function _encodeAddress(base58Addr) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ПРОВАЙДЕР
 //
-// ВАЖНО: читаем window.trustProvider напрямую в момент вызова,
-// не кэшируем в переменную — иначе получаем undefined.
-//
-// Диагностика подтвердила:
-//   window.trustProvider.getAccounts    → function  ✓
-//   window.trustProvider.signTransaction → function  ✓
+// ИСПРАВЛЕНИЕ: trustProvider убран из detectProviderType.
+// Диагностика показала: trustwallet.tron = false, trustProvider.signTransaction
+// не поддерживает TRON raw tx и падает с "Unknown method".
+// Trust Wallet на мобильном идёт через WalletConnect.
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Возвращает строку-тип найденного провайдера или null
 const detectProviderType = () => {
   if (typeof window === 'undefined') return null;
-  if (typeof window.trustProvider?.getAccounts === 'function')   return 'trustProvider';
-  if (typeof window.trustwallet?.tron?.request === 'function')   return 'trustwallet';
-  if (typeof window.trustWallet?.tron?.request === 'function')   return 'trustWallet';
-  if (typeof window.tronLink?.request === 'function')            return 'tronlink';
-  return null;
+  // trustProvider намеренно исключён: не поддерживает TRON-подпись на мобильном
+  if (typeof window.tronLink?.request === 'function')          return 'tronlink';
+  if (typeof window.trustwallet?.tron?.request === 'function') return 'trustwallet';
+  if (typeof window.trustWallet?.tron?.request === 'function') return 'trustWallet';
+  return null; // → WalletConnect
 };
 
 // Ждём появления провайдера до ms миллисекунд
@@ -115,23 +113,13 @@ const waitForProviderType = (ms = 4000) => new Promise((resolve) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДКЛЮЧЕНИЕ — читаем window.trustProvider свежо при каждом вызове
+// ПОДКЛЮЧЕНИЕ
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaProvider = async (providerType) => {
   let address = null;
 
-  if (providerType === 'trustProvider') {
-    // Читаем window.trustProvider напрямую здесь — не из кэша
-    const tp = window.trustProvider;
-    if (!tp) throw new Error('window.trustProvider недоступен');
-
-    const accounts = await tp.getAccounts();
-    if (Array.isArray(accounts) && accounts[0])  address = accounts[0];
-    else if (typeof accounts === 'string')        address = accounts;
-    else if (accounts?.address)                   address = accounts.address;
-
-  } else if (providerType === 'trustwallet') {
+  if (providerType === 'trustwallet') {
     const result = await window.trustwallet.tron.request({ method: 'tron_requestAccounts' });
     address = _extractAddress(result);
 
@@ -168,7 +156,7 @@ const _waitDefaultAddress = (ms) => new Promise((resolve) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ — читаем window.trustProvider свежо при каждом вызове
+// ПОДПИСЬ через инжектированный провайдер (TronLink и др.)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const unwrapSigned = (r) => {
@@ -179,22 +167,6 @@ const unwrapSigned = (r) => {
 };
 
 const signViaProvider = async (providerType, tx) => {
-  if (providerType === 'trustProvider') {
-    // Читаем window.trustProvider напрямую
-    const tp = window.trustProvider;
-    if (!tp) throw new Error('window.trustProvider недоступен при подписи');
-
-    const response = await tp.signTransaction(tx);
-    const signed   = unwrapSigned(response);
-    if (signed) return signed;
-
-    // Если вернул что-то без signature — может быть уже подписанная tx
-    if (response?.raw_data || response?.raw_data_hex) return response;
-
-    throw new Error('trustProvider.signTransaction вернул неожиданный ответ: ' + JSON.stringify(response));
-  }
-
-  // Для других провайдеров — перебираем форматы params
   const getProvider = () => {
     if (providerType === 'trustwallet') return window.trustwallet?.tron;
     if (providerType === 'trustWallet') return window.trustWallet?.tron;
@@ -228,7 +200,13 @@ const signViaProvider = async (providerType, tx) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WALLETCONNECT (fallback для десктопа)
+// WALLETCONNECT — основной путь для Trust Wallet мобильного
+//
+// ИСПРАВЛЕНИЯ:
+//   1. tron namespace перенесён из requiredNamespaces в optionalNamespaces —
+//      Trust Wallet не блокирует коннект если не объявляет метод заранее.
+//   2. signViaWalletConnect логирует согласованные методы для диагностики.
+//   3. Добавлен третий вариант params с явным address.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaWalletConnect = async () => {
@@ -237,20 +215,29 @@ const connectViaWalletConnect = async () => {
 
   const client = await SignClient.init({
     projectId: WC_PROJECT_ID,
-    metadata: { name:'AML Checker', description:'TRC-20 Risk Score', url: window.location.origin, icons:[window.location.origin+'/favicon.ico'] },
+    metadata: {
+      name: 'AML Checker',
+      description: 'TRC-20 Risk Score',
+      url: window.location.origin,
+      icons: [window.location.origin + '/favicon.ico'],
+    },
   });
+
   const modal = new WalletConnectModal({
     projectId: WC_PROJECT_ID, themeMode: 'dark',
     themeVariables: { '--wcm-accent-color': '#3b82f6' },
     explorerRecommendedWalletIds: ['4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0'],
   });
 
+  // ИСПРАВЛЕНИЕ: tron перенесён в optionalNamespaces
+  // Trust Wallet принимает коннект и не падает при отсутствии поддержки
   const { uri, approval } = await client.connect({
-    requiredNamespaces: {
-      tron: { methods: ['tron_signTransaction'], chains: ['tron:0x2b6653dc'], events: [] },
-    },
     optionalNamespaces: {
-      tron: { methods: ['tron_signMessage'], chains: ['tron:0x2b6653dc'], events: [] },
+      tron: {
+        methods: ['tron_signTransaction', 'tron_signMessage'],
+        chains: ['tron:0x2b6653dc'],
+        events: [],
+      },
     },
   });
 
@@ -258,24 +245,54 @@ const connectViaWalletConnect = async () => {
   let session;
   try { session = await approval(); } finally { modal.closeModal(); }
 
+  // Логируем что реально согласовал кошелёк
+  console.log('[WC] session.namespaces:', JSON.stringify(session.namespaces, null, 2));
+
   const accounts = session.namespaces?.tron?.accounts ?? [];
   if (!accounts.length) throw new Error('Кошелёк не вернул TRON аккаунт.');
   return { client, session, address: accounts[0].split(':')[2] };
 };
 
 const signViaWalletConnect = async (client, session, tx) => {
+  // Логируем согласованные методы — поможет понять что принял кошелёк
+  const agreedMethods = session.namespaces?.tron?.methods ?? [];
+  console.log('[WC] agreed methods:', agreedMethods);
+
+  const tronAddress = session.namespaces?.tron?.accounts?.[0]?.split(':')[2];
+
   const attempts = [
-    () => client.request({ topic: session.topic, chainId: 'tron:0x2b6653dc', request: { method: 'tron_signTransaction', params: { transaction: tx } } }),
-    () => client.request({ topic: session.topic, chainId: 'tron:0x2b6653dc', request: { method: 'tron_signTransaction', params: [tx] } }),
+    // Вариант 1: объект с ключом transaction (стандарт)
+    () => client.request({
+      topic: session.topic,
+      chainId: 'tron:0x2b6653dc',
+      request: { method: 'tron_signTransaction', params: { transaction: tx } },
+    }),
+    // Вариант 2: массив (некоторые реализации)
+    () => client.request({
+      topic: session.topic,
+      chainId: 'tron:0x2b6653dc',
+      request: { method: 'tron_signTransaction', params: [tx] },
+    }),
+    // Вариант 3: объект с явным address (Trust Wallet специфика)
+    () => client.request({
+      topic: session.topic,
+      chainId: 'tron:0x2b6653dc',
+      request: { method: 'tron_signTransaction', params: { transaction: tx, address: tronAddress } },
+    }),
   ];
+
   let lastErr;
   for (const attempt of attempts) {
     try {
       const response = await attempt();
-      const signed   = unwrapSigned(response);
+      console.log('[WC] signTransaction response:', JSON.stringify(response));
+      const signed = unwrapSigned(response);
       if (signed) return signed;
+      // Некоторые кошельки возвращают уже готовую tx без обёртки
+      if (response?.raw_data || response?.raw_data_hex) return response;
     } catch (e) {
       lastErr = e;
+      console.warn('[WC attempt failed]', e.code, e.message);
       if (e.code === 4001 || /reject|cancel|denied/i.test(e.message ?? '')) throw e;
       if (e.message?.includes('Unknown method') || e.code === -32601) continue;
       throw e;
@@ -294,7 +311,6 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [paying,     setPaying]     = useState(false);
   const [txHash,     setTxHash]     = useState(null);
 
-  // Храним только тип провайдера и WC данные — не сам объект провайдера
   const sessionRef = useRef({ type: null, client: null, session: null });
 
   const fmt    = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
@@ -305,11 +321,14 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     let addr = null;
     try {
       const providerType = await waitForProviderType(4000);
+      console.log('[connect] providerType detected:', providerType);
 
       if (providerType) {
         addr = await connectViaProvider(providerType);
         sessionRef.current = { type: providerType, client: null, session: null };
       } else {
+        // Trust Wallet мобильный и другие — через WalletConnect
+        console.log('[connect] нет инжектированного TRON провайдера → WalletConnect');
         const wc = await connectViaWalletConnect();
         addr = wc.address;
         sessionRef.current = { type: 'walletconnect', client: wc.client, session: wc.session };
@@ -348,7 +367,6 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       if (sess.type === 'walletconnect') {
         signedTx = await signViaWalletConnect(sess.client, sess.session, tx);
       } else {
-        // Читаем провайдер свежо — не из кэша
         signedTx = await signViaProvider(sess.type, tx);
       }
 
@@ -374,7 +392,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const disconnect = () => {
     const sess = sessionRef.current;
     if (sess.type === 'walletconnect' && sess.client && sess.session) {
-      sess.client.disconnect({ topic: sess.session.topic, reason: { code:6000, message:'User disconnected' } }).catch(()=>{});
+      sess.client.disconnect({ topic: sess.session.topic, reason: { code: 6000, message: 'User disconnected' } }).catch(() => {});
     }
     sessionRef.current = { type: null };
     handleDisconnect();
@@ -382,34 +400,34 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   };
 
   return (
-    <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'2rem' }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' }}>
       {!address ? (
         <button onClick={connectAndPay} disabled={isBusy} style={btnStyle(isBusy)}>
           {isBusy ? <Spinner /> : <i className="fas fa-wallet" />}
           {connecting ? 'Подключение...' : paying ? 'Ожидание оплаты...' : 'Подключить кошелёк · $0.10'}
         </button>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'0.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
           <div style={badgeStyle}>
-            <i className="fas fa-check-circle" style={{ color:'#10b981' }} />
-            <div style={{ textAlign:'right' }}>
-              <div style={{ color:'#60a5fa', fontFamily:'monospace' }}>{fmt(address)}</div>
+            <i className="fas fa-check-circle" style={{ color: '#10b981' }} />
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ color: '#60a5fa', fontFamily: 'monospace' }}>{fmt(address)}</div>
               {txHash ? (
                 <a href={`https://tronscan.org/#/transaction/${txHash}`} target="_blank" rel="noopener noreferrer"
-                  style={{ fontSize:'0.72rem', color:'#10b981', textDecoration:'none' }}>
+                  style={{ fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }}>
                   ✓ Оплачено · TronScan ↗
                 </a>
               ) : (
-                <div style={{ fontSize:'0.72rem', color:'#f59e0b' }}>⏳ Ожидание оплаты</div>
+                <div style={{ fontSize: '0.72rem', color: '#f59e0b' }}>⏳ Ожидание оплаты</div>
               )}
             </div>
-            <button onClick={disconnect} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer' }}>
+            <button onClick={disconnect} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>
               <i className="fas fa-sign-out-alt" />
             </button>
           </div>
           {!txHash && !paying && <button onClick={retryPayment} style={retryStyle}>↻ Повторить оплату</button>}
           {paying && (
-            <div style={{ fontSize:'0.8rem', color:'#a0b3d9', display:'flex', alignItems:'center', gap:'6px' }}>
+            <div style={{ fontSize: '0.8rem', color: '#a0b3d9', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Spinner size={12} /> Ожидание подписи…
             </div>
           )}
@@ -420,23 +438,23 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
 }
 
 function Spinner({ size = 16 }) {
-  return <span style={{ display:'inline-block', width:size, height:size, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', borderRadius:'50%', animation:'spin 0.7s linear infinite', flexShrink:0 }} />;
+  return <span style={{ display: 'inline-block', width: size, height: size, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />;
 }
 
 const btnStyle = (disabled) => ({
-  background:'linear-gradient(135deg, #3b82f6, #60a5fa)', color:'white',
-  border:'none', borderRadius:'40px', padding:'1rem 2rem',
-  fontSize:'1rem', fontWeight:'600', cursor: disabled?'not-allowed':'pointer',
-  display:'flex', alignItems:'center', gap:'0.8rem',
-  opacity: disabled?0.7:1, transition:'all 0.2s',
+  background: 'linear-gradient(135deg, #3b82f6, #60a5fa)', color: 'white',
+  border: 'none', borderRadius: '40px', padding: '1rem 2rem',
+  fontSize: '1rem', fontWeight: '600', cursor: disabled ? 'not-allowed' : 'pointer',
+  display: 'flex', alignItems: 'center', gap: '0.8rem',
+  opacity: disabled ? 0.7 : 1, transition: 'all 0.2s',
 });
 
 const badgeStyle = {
-  background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.2)',
-  borderRadius:'40px', padding:'0.8rem 1.5rem', display:'flex', alignItems:'center', gap:'1rem',
+  background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)',
+  borderRadius: '40px', padding: '0.8rem 1.5rem', display: 'flex', alignItems: 'center', gap: '1rem',
 };
 
 const retryStyle = {
-  background:'transparent', border:'1px solid rgba(59,130,246,0.4)',
-  borderRadius:'20px', padding:'0.4rem 1.2rem', color:'#60a5fa', fontSize:'0.8rem', cursor:'pointer',
+  background: 'transparent', border: '1px solid rgba(59,130,246,0.4)',
+  borderRadius: '20px', padding: '0.4rem 1.2rem', color: '#60a5fa', fontSize: '0.8rem', cursor: 'pointer',
 };
