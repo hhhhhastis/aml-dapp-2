@@ -43,12 +43,14 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [txHash, setTxHash]             = useState(null);
   const [debugInfo, setDebugInfo]       = useState('');
 
-  // Создаём адаптер один раз
+  // Создаём адаптер один раз — отключаем deeplink (мы УЖЕ внутри TrustWallet)
   const adapter = useMemo(() => new TrustAdapter({
     openUrlWhenWalletNotFound: false,
+    openTrustWalletAppOnMobile: false,
+    checkTimeout: 3000,
   }), []);
 
-  // Получаем tronWeb из window.trustwallet.tronLink.tronWeb
+  // tronWeb живёт в window.trustwallet.tronLink.tronWeb (официальная документация)
   const getTronWeb = () =>
     window.trustwallet?.tronLink?.tronWeb ||
     window.tronWeb ||
@@ -110,10 +112,34 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     }
   };
 
+  // ─── Ждём пока адаптер инициализируется ─────────────────────────────────
+  const waitAdapterReady = (ms = 5000) => new Promise((resolve, reject) => {
+    if (adapter.readyState === 'Found' || adapter.readyState === 'Installed') return resolve();
+    let elapsed = 0;
+    const iv = setInterval(() => {
+      if (adapter.readyState === 'Found' || adapter.readyState === 'Installed') {
+        clearInterval(iv); resolve();
+      }
+      elapsed += 200;
+      if (elapsed >= ms) { clearInterval(iv); reject(new Error('Adapter не готов: ' + adapter.readyState)); }
+    }, 200);
+    // Слушаем событие readyStateChanged
+    adapter.once('readyStateChanged', (state) => {
+      if (state === 'Found' || state === 'Installed') { clearInterval(iv); resolve(); }
+    });
+  });
+
   // ─── Подключение через TrustAdapter ──────────────────────────────────────
   const handleConnect = async () => {
     setConnecting(true);
     try {
+      console.log('[Connect] readyState:', adapter.readyState);
+      // Если Loading — ждём инициализации
+      if (adapter.readyState === 'Loading') {
+        setDebugInfo('waiting adapter...');
+        await waitAdapterReady(5000);
+      }
+      console.log('[Connect] readyState after wait:', adapter.readyState);
       await adapter.connect();
       // адрес придёт через событие 'connect'
     } catch (err) {
