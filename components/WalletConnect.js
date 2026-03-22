@@ -20,22 +20,10 @@ const switchToTron = async () => {
       params: [{ chainId: TRON_CHAIN_ID }],
     });
   } catch (switchErr) {
-    console.log('[switchToTron] err code:', switchErr.code, switchErr.message);
-    // Сеть не добавлена — добавляем
-    if (switchErr.code === 4902 || switchErr.code === -32603) {
-      await provider.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId:   TRON_CHAIN_ID,
-          chainName: 'Tron Nile Testnet',
-          nativeCurrency: { name: 'TRX', symbol: 'TRX', decimals: 6 },
-          rpcUrls:           ['https://nile.trongrid.io/jsonrpc'],
-          blockExplorerUrls: ['https://nile.tronscan.org'],
-        }],
-      });
-    } else {
-      throw switchErr;
-    }
+    // Бросаем с полными деталями для диагностики
+    const errInfo = 'code:' + switchErr.code + ' msg:' + (switchErr.message || '').slice(0, 80);
+    console.log('[switchToTron] err:', errInfo);
+    throw new Error(errInfo);
   }
 };
 
