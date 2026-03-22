@@ -1,21 +1,5 @@
-// DiagnosticPage.jsx
-// Добавь временно в роутер: <Route path="/diag" element={<DiagnosticPage />} />
-// Открывай в браузере Trust Wallet: aml-dapp-2.vercel.app/diag
-
+// pages/diag.jsx
 import { useState, useEffect } from 'react';
-
-function inspect(val, depth = 0) {
-  if (depth > 2) return '...';
-  if (val === null) return 'null';
-  if (val === undefined) return 'undefined';
-  const t = typeof val;
-  if (t === 'function') return 'function';
-  if (t !== 'object') return String(val);
-  try {
-    const keys = Object.keys(val);
-    return keys.length ? keys.join(', ') : '{}';
-  } catch { return '[недоступно]'; }
-}
 
 function Row({ label, value, ok }) {
   const color = ok === true ? '#10b981' : ok === false ? '#ef4444' : '#f59e0b';
@@ -44,68 +28,87 @@ export default function DiagnosticPage() {
 
   const runDiag = async () => {
     setLog([]);
-    addLog('▶ Запуск диагностики...');
+    setData(null);
+    addLog('▶ Запуск диагностики v2...');
     const result = {};
 
-    // ── window.trustProvider ──────────────────────────────────────────────
-    const tp = window.trustProvider;
-    result.tp_typeof          = typeof tp;
-    result.tp_isNull          = tp === null;
-    result.tp_isUndefined     = tp === undefined;
-    result.tp_keys            = tp ? inspect(tp) : '—';
-    result.tp_getAccounts     = typeof tp?.getAccounts;
-    result.tp_signTransaction = typeof tp?.signTransaction;
-    result.tp_request         = typeof tp?.request;
-    addLog(`trustProvider type: ${typeof tp}`);
+    // ── window.trustwallet прямой request ──────────────────────────────────
+    const tw = window.trustwallet;
+    result.tw_request_type = typeof tw?.request;
+    result.tw_send_type    = typeof tw?.send;
 
-    // ── Повторное чтение через 500мс ──────────────────────────────────────
-    await new Promise(r => setTimeout(r, 500));
-    const tp2 = window.trustProvider;
-    result.tp2_typeof     = typeof tp2;
-    result.tp2_sameRef    = tp === tp2;
-    result.tp2_getAccounts = typeof tp2?.getAccounts;
-    addLog(`trustProvider через 500мс: ${typeof tp2}, same ref: ${tp === tp2}`);
-
-    // ── window.trustwallet ────────────────────────────────────────────────
-    result.tw_typeof     = typeof window.trustwallet;
-    result.tw_tron       = typeof window.trustwallet?.tron;
-    result.tw_tron_req   = typeof window.trustwallet?.tron?.request;
-    result.tw_keys       = window.trustwallet ? inspect(window.trustwallet) : '—';
-
-    // ── window.trustWallet ────────────────────────────────────────────────
-    result.tW_typeof     = typeof window.trustWallet;
-    result.tW_tron       = typeof window.trustWallet?.tron;
-    result.tW_tron_req   = typeof window.trustWallet?.tron?.request;
-
-    // ── window.tronLink ───────────────────────────────────────────────────
-    result.tl_typeof     = typeof window.tronLink;
-    result.tl_request    = typeof window.tronLink?.request;
-
-    // ── window.tronWeb ────────────────────────────────────────────────────
-    result.tronWeb       = typeof window.tronWeb;
-
-    // ── Попытка вызвать getAccounts ───────────────────────────────────────
-    addLog('Пробуем вызвать trustProvider.getAccounts()...');
+    // Пробуем tron_requestAccounts через window.trustwallet.request напрямую
+    addLog('Пробуем trustwallet.request({method:"tron_requestAccounts"})...');
     try {
-      const tp3 = window.trustProvider;
-      addLog(`trustProvider перед вызовом: ${typeof tp3}, getAccounts: ${typeof tp3?.getAccounts}`);
-      if (typeof tp3?.getAccounts === 'function') {
-        const accounts = await tp3.getAccounts();
-        result.getAccounts_result = JSON.stringify(accounts);
-        addLog(`✅ getAccounts вернул: ${JSON.stringify(accounts)}`);
+      if (typeof tw?.request === 'function') {
+        const r = await tw.request({ method: 'tron_requestAccounts' });
+        result.tw_request_result = JSON.stringify(r);
+        addLog('✅ trustwallet.request успех: ' + JSON.stringify(r));
       } else {
-        result.getAccounts_result = 'getAccounts не является функцией';
-        addLog(`❌ getAccounts не функция: ${typeof tp3?.getAccounts}`);
+        result.tw_request_result = 'request не функция';
+        addLog('❌ trustwallet.request не функция');
       }
     } catch (e) {
-      result.getAccounts_error = e.message;
-      addLog(`❌ Ошибка getAccounts: ${e.message}`);
+      result.tw_request_error = e.message;
+      addLog('❌ trustwallet.request ошибка: ' + e.message);
     }
 
-    // ── User Agent ────────────────────────────────────────────────────────
-    result.userAgent = navigator.userAgent.slice(0, 80);
+    // ── Пробуем trustwallet.send ───────────────────────────────────────────
+    addLog('Пробуем trustwallet.send({method:"tron_requestAccounts"})...');
+    try {
+      if (typeof tw?.send === 'function') {
+        const r = await tw.send({ method: 'tron_requestAccounts' });
+        result.tw_send_result = JSON.stringify(r);
+        addLog('✅ trustwallet.send успех: ' + JSON.stringify(r));
+      } else {
+        result.tw_send_result = 'send не функция';
+        addLog('❌ trustwallet.send не функция');
+      }
+    } catch (e) {
+      result.tw_send_error = e.message;
+      addLog('❌ trustwallet.send ошибка: ' + e.message);
+    }
 
-    addLog('✅ Диагностика завершена');
+    // ── Пробуем trustProvider через bind ──────────────────────────────────
+    addLog('Пробуем trustProvider.getAccounts через bind...');
+    try {
+      const tp = window.trustProvider;
+      if (tp && typeof tp.getAccounts === 'function') {
+        const bound = tp.getAccounts.bind(tp);
+        const r = await bound();
+        result.tp_bind_result = JSON.stringify(r);
+        addLog('✅ bind успех: ' + JSON.stringify(r));
+      } else {
+        addLog('❌ trustProvider.getAccounts не доступен');
+      }
+    } catch (e) {
+      result.tp_bind_error = e.message;
+      addLog('❌ bind ошибка: ' + e.message);
+    }
+
+    // ── Пробуем через window напрямую ─────────────────────────────────────
+    addLog('Пробуем window.trustProvider.getAccounts() напрямую...');
+    try {
+      const r = await window.trustProvider.getAccounts();
+      result.tp_direct_result = JSON.stringify(r);
+      addLog('✅ напрямую успех: ' + JSON.stringify(r));
+    } catch (e) {
+      result.tp_direct_error = e.message;
+      addLog('❌ напрямую ошибка: ' + e.message);
+    }
+
+    // ── Все ключи window.trustwallet ──────────────────────────────────────
+    try {
+      result.tw_all_keys = Object.keys(window.trustwallet || {}).join(', ');
+    } catch { result.tw_all_keys = 'ошибка'; }
+
+    // ── Версия TW если есть ───────────────────────────────────────────────
+    result.tw_version = window.trustwallet?.version ?? 'нет';
+    result.tw_isTrust = window.trustwallet?.isTrust ?? 'нет';
+
+    result.userAgent = navigator.userAgent.slice(0, 100);
+
+    addLog('✅ Диагностика v2 завершена');
     setData(result);
   };
 
@@ -115,61 +118,40 @@ export default function DiagnosticPage() {
 
   return (
     <div style={s}>
-      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: '#fff' }}>🔍 Trust Wallet Диагностика</div>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>🔍 TW Диагностика v2</div>
       <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>aml-dapp-2.vercel.app/diag</div>
 
       <button onClick={runDiag} style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 14, cursor: 'pointer', marginBottom: 16 }}>
         🔄 Перезапустить
       </button>
 
-      {/* Лог */}
-      <Section title="📋 Лог выполнения">
+      <Section title="📋 Лог">
         {log.map((l, i) => (
           <div key={i} style={{ fontSize: 12, fontFamily: 'monospace', color: l.includes('✅') ? '#10b981' : l.includes('❌') ? '#ef4444' : '#94a3b8', padding: '2px 0' }}>{l}</div>
         ))}
       </Section>
 
       {data && <>
-        <Section title="window.trustProvider (первое чтение)">
-          <Row label="typeof"          value={data.tp_typeof}          ok={data.tp_typeof === 'object'} />
-          <Row label="=== undefined"   value={data.tp_isUndefined}     ok={!data.tp_isUndefined} />
-          <Row label="=== null"        value={data.tp_isNull}          ok={!data.tp_isNull} />
-          <Row label="keys"            value={data.tp_keys} />
-          <Row label="getAccounts"     value={data.tp_getAccounts}     ok={data.tp_getAccounts === 'function'} />
-          <Row label="signTransaction" value={data.tp_signTransaction} ok={data.tp_signTransaction === 'function'} />
-          <Row label="request"         value={data.tp_request} />
+        <Section title="trustwallet.request напрямую">
+          <Row label="typeof request" value={data.tw_request_type} ok={data.tw_request_type === 'function'} />
+          <Row label="typeof send"    value={data.tw_send_type}    ok={data.tw_send_type === 'function'} />
+          {data.tw_request_result !== undefined && <Row label="request результат" value={data.tw_request_result} ok={true} />}
+          {data.tw_request_error   !== undefined && <Row label="request ошибка"   value={data.tw_request_error}  ok={false} />}
+          {data.tw_send_result     !== undefined && <Row label="send результат"   value={data.tw_send_result}    ok={true} />}
+          {data.tw_send_error      !== undefined && <Row label="send ошибка"      value={data.tw_send_error}     ok={false} />}
         </Section>
 
-        <Section title="window.trustProvider (через 500мс)">
-          <Row label="typeof"          value={data.tp2_typeof}      ok={data.tp2_typeof === 'object'} />
-          <Row label="same reference"  value={data.tp2_sameRef} />
-          <Row label="getAccounts"     value={data.tp2_getAccounts} ok={data.tp2_getAccounts === 'function'} />
+        <Section title="trustProvider через bind / напрямую">
+          {data.tp_bind_result   !== undefined && <Row label="bind результат"    value={data.tp_bind_result}   ok={true} />}
+          {data.tp_bind_error    !== undefined && <Row label="bind ошибка"       value={data.tp_bind_error}    ok={false} />}
+          {data.tp_direct_result !== undefined && <Row label="прямой результат"  value={data.tp_direct_result} ok={true} />}
+          {data.tp_direct_error  !== undefined && <Row label="прямой ошибка"     value={data.tp_direct_error}  ok={false} />}
         </Section>
 
-        <Section title="Вызов getAccounts()">
-          {data.getAccounts_result !== undefined
-            ? <Row label="результат" value={data.getAccounts_result} ok={true} />
-            : <Row label="ошибка"    value={data.getAccounts_error}  ok={false} />
-          }
-        </Section>
-
-        <Section title="window.trustwallet">
-          <Row label="typeof"       value={data.tw_typeof} />
-          <Row label=".tron"        value={data.tw_tron} />
-          <Row label=".tron.request" value={data.tw_tron_req} ok={data.tw_tron_req === 'function'} />
-          <Row label="keys"         value={data.tw_keys} />
-        </Section>
-
-        <Section title="window.trustWallet">
-          <Row label="typeof"        value={data.tW_typeof} />
-          <Row label=".tron"         value={data.tW_tron} />
-          <Row label=".tron.request" value={data.tW_tron_req} ok={data.tW_tron_req === 'function'} />
-        </Section>
-
-        <Section title="window.tronLink / tronWeb">
-          <Row label="tronLink typeof"  value={data.tl_typeof} />
-          <Row label="tronLink.request" value={data.tl_request} ok={data.tl_request === 'function'} />
-          <Row label="tronWeb"          value={data.tronWeb} />
+        <Section title="window.trustwallet мета">
+          <Row label="all keys" value={data.tw_all_keys} />
+          <Row label="version"  value={data.tw_version} />
+          <Row label="isTrust"  value={data.tw_isTrust} />
         </Section>
 
         <Section title="User Agent">
