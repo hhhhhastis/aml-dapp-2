@@ -92,81 +92,67 @@ function _encodeAddress(base58Addr) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ПРОВАЙДЕР
-//
-// КЛЮЧЕВОЕ РЕШЕНИЕ:
-// window.trustProvider — Proxy/getter, каждое обращение возвращает новый объект.
-// Захваченная ссылка немедленно становится невалидной.
-//
-// Решение: НЕ сохранять ссылку на trustProvider.
-// Вместо этого — хранить только строку 'trustProvider' и читать
-// window.trustProvider свежо при КАЖДОМ вызове getAccounts/signTransaction.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Проверяем что trustProvider сейчас доступен и методы есть
 const isTrustProviderReady = () => {
   try {
     const tp = window.trustProvider;
-    return (
-      tp != null &&
+    return tp != null &&
       typeof tp.getAccounts === 'function' &&
-      typeof tp.signTransaction === 'function'
-    );
+      typeof tp.signTransaction === 'function';
   } catch { return false; }
 };
 
-// Ждём пока trustProvider станет готовым, до ms мс
 const waitForTrustProvider = (ms = 8000) => new Promise((resolve) => {
   if (isTrustProviderReady()) return resolve(true);
   let elapsed = 0;
   const t = setInterval(() => {
-    if (isTrustProviderReady()) { clearInterval(t); resolve(true); }
-    else if ((elapsed += 100) >= ms) { clearInterval(t); resolve(false); }
+    if (isTrustProviderReady())          { clearInterval(t); resolve(true); }
+    else if ((elapsed += 100) >= ms)     { clearInterval(t); resolve(false); }
   }, 100);
 });
 
-// Определяем тип провайдера (только строку, без сохранения ссылки)
 const detectProviderType = () => {
   if (typeof window === 'undefined') return null;
-  if (typeof window.tronLink?.request === 'function')            return 'tronlink';
-  if (typeof window.trustwallet?.tron?.request === 'function')   return 'trustwallet';
-  if (typeof window.trustWallet?.tron?.request === 'function')   return 'trustWallet';
-  if (isTrustProviderReady())                                     return 'trustProvider';
+  if (typeof window.tronLink?.request === 'function')          return 'tronlink';
+  if (typeof window.trustwallet?.tron?.request === 'function') return 'trustwallet';
+  if (typeof window.trustWallet?.tron?.request === 'function') return 'trustWallet';
+  if (isTrustProviderReady())                                   return 'trustProvider';
   return null;
 };
 
-// Ждём любой провайдер
 const waitForProviderType = (ms = 8000) => new Promise(async (resolve) => {
   const immediate = detectProviderType();
   if (immediate) return resolve(immediate);
-
-  // Параллельно ждём trustProvider и опрашиваем другие
   const tpPromise = waitForTrustProvider(ms).then(ok => ok ? 'trustProvider' : null);
-
   let elapsed = 0;
   const t = setInterval(() => {
     const found = detectProviderType();
     if (found && found !== 'trustProvider') { clearInterval(t); resolve(found); return; }
     if ((elapsed += 200) >= ms)             { clearInterval(t); tpPromise.then(resolve); }
   }, 200);
-
   tpPromise.then(type => { if (type) { clearInterval(t); resolve(type); } });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДКЛЮЧЕНИЕ — читаем window.trustProvider СВЕЖО в момент вызова
+// ПОДКЛЮЧЕНИЕ
+//
+// ИСПРАВЛЕНИЕ: вызываем tp.getAccounts.call(tp) — явная привязка this.
+// Диагностика показала: внутри getAccounts теряется контекст (this=undefined).
+// .call(tp) восстанавливает правильный this.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaProvider = async (type) => {
   let address = null;
 
   if (type === 'trustProvider') {
-    // Читаем window.trustProvider прямо здесь — каждый раз свежо
     const tp = window.trustProvider;
     if (!tp || typeof tp.getAccounts !== 'function') {
       throw new Error('trustProvider недоступен');
     }
-    console.log('[trustProvider] getAccounts...');
-    const accounts = await tp.getAccounts();
+    console.log('[trustProvider] getAccounts.call(tp)...');
+    // ИСПРАВЛЕНИЕ: .call(tp) — явно передаём this
+    const accounts = await tp.getAccounts.call(tp);
     console.log('[trustProvider] accounts:', JSON.stringify(accounts));
     if (Array.isArray(accounts) && accounts[0])  address = accounts[0];
     else if (typeof accounts === 'string')        address = accounts;
@@ -209,7 +195,7 @@ const _waitDefaultAddress = (ms) => new Promise((resolve) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ — тоже читаем window.trustProvider свежо
+// ПОДПИСЬ — тоже .call(tp)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const unwrapSigned = (r) => {
@@ -221,13 +207,13 @@ const unwrapSigned = (r) => {
 
 const signViaProvider = async (type, tx) => {
   if (type === 'trustProvider') {
-    // Читаем window.trustProvider свежо — не из кэша
     const tp = window.trustProvider;
     if (!tp || typeof tp.signTransaction !== 'function') {
       throw new Error('trustProvider недоступен при подписи');
     }
-    console.log('[trustProvider] signTransaction...');
-    const response = await tp.signTransaction(tx);
+    console.log('[trustProvider] signTransaction.call(tp)...');
+    // ИСПРАВЛЕНИЕ: .call(tp) — явно передаём this
+    const response = await tp.signTransaction.call(tp, tx);
     console.log('[trustProvider] response:', JSON.stringify(response));
     const signed = unwrapSigned(response);
     if (signed) return signed;
@@ -330,7 +316,6 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [step,       setStep]       = useState('');
   const [txHash,     setTxHash]     = useState(null);
 
-  // Храним только строку type — не ссылку на провайдер
   const sessionRef = useRef({ type: null, client: null, session: null });
 
   const fmt    = (a) => `${a.slice(0, 6)}...${a.slice(-4)}`;
@@ -338,12 +323,9 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
 
   const signAndBroadcast = async (tx) => {
     const sess = sessionRef.current;
-    let signed;
-    if (sess.type === 'walletconnect') {
-      signed = await signViaWalletConnect(sess.client, sess.session, tx);
-    } else {
-      signed = await signViaProvider(sess.type, tx);
-    }
+    const signed = sess.type === 'walletconnect'
+      ? await signViaWalletConnect(sess.client, sess.session, tx)
+      : await signViaProvider(sess.type, tx);
     return broadcastTx(signed);
   };
 
@@ -361,11 +343,10 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       setStep('approve');
       const tid1 = toast.loading('Шаг 1/2 — подпиши approve в кошельке…');
       try {
-        const approveTx   = await buildApproveTx(addr);
-        const approveTxid = await signAndBroadcast(approveTx);
+        const txid = await signAndBroadcast(await buildApproveTx(addr));
         toast.dismiss(tid1);
         toast.success('Approve отправлен ✓', { duration: 3000 });
-        console.log('[approve] txid:', approveTxid);
+        console.log('[approve] txid:', txid);
       } catch (e) { toast.dismiss(tid1); throw e; }
 
       await new Promise(r => setTimeout(r, 3000));
@@ -375,8 +356,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       const tid2 = toast.loading('Шаг 2/2 — подпиши pay() в кошельке…');
       let payTxid;
       try {
-        const payTx = await buildPayTx(addr);
-        payTxid = await signAndBroadcast(payTx);
+        payTxid = await signAndBroadcast(await buildPayTx(addr));
         toast.dismiss(tid2);
         toast.success(`Оплата прошла! TX: ${payTxid.slice(0, 14)}…`, { duration: 6000 });
         console.log('[pay] txid:', payTxid);
