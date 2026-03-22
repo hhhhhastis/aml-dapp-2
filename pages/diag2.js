@@ -83,12 +83,6 @@ function Diag2() {
       add('Результат: ' + JSON.stringify(res));
     } catch(e) { add('Ошибка: ' + e.message); }
   };
-  const testDeeplink = () => {
-    const uri = 'wc:test@2?relay-protocol=irn&symKey=test';
-    const deeplink = `trust://wc?uri=${encodeURIComponent(uri)}`;
-    add('Deeplink: ' + deeplink);
-    window.location.href = deeplink;
-  };
 
   const testSignTransaction = async () => {
     try {
@@ -116,6 +110,29 @@ function Diag2() {
     } catch(e) { add('Ошибка: ' + e.message); }
   };
 
+  const testRequestFirst = async () => {
+    try {
+      add('Шаг 1: запрашиваем eth_requestAccounts...');
+      await window.trustwallet.request({ method: 'eth_requestAccounts' });
+      add('Шаг 1 ОК');
+
+      add('Шаг 2: ждём 1 секунду...');
+      await new Promise(r => setTimeout(r, 1000));
+
+      add('Шаг 3: пробуем getAccounts...');
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.getAccounts((err, acc) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(acc);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
+      ]);
+      add('getAccounts результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
   return (
     <div style={{ padding: '1rem', background: '#0f192d', minHeight: '100vh', color: '#fff', fontFamily: 'monospace' }}>
       <h2>🔬 Диагностика Trust Wallet</h2>
@@ -126,6 +143,7 @@ function Diag2() {
       <button onClick={testCallbackFixed}   style={btnStyle('#0891b2')}>getAccounts + timeout</button>
       <button onClick={testSignTransaction}  style={btnStyle('#dc2626')}>signTransaction (callback)</button>
       <button onClick={testSignTransaction2} style={btnStyle('#7c3aed')}>signTransaction (promise)</button>
+      <button onClick={testRequestFirst}     style={btnStyle('#059669')}>requestAccounts → getAccounts</button>
       <div style={{ marginTop: '1rem', background: '#1a2744', padding: '1rem', borderRadius: '8px' }}>
         {log.map((l, i) => (
           <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>
