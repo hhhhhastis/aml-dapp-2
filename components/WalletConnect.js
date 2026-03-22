@@ -8,46 +8,72 @@ const TRONGRID_URL        = 'https://nile.trongrid.io';
 
 // ─── Диагностика window.trustwallet ──────────────────────────────────────────
 const diagnoseTrustWallet = () => {
-  if (!window.trustwallet) return 'trustwallet:none';
-  
-  const core = window.trustwallet.core;
-  if (!core) return 'core:false';
+  const wt = window.trustwallet;
+  if (!wt) return 'trustwallet:none';
 
   const results = [];
-  
-  const props = [
-    'request', 'enable', 'send', 'sendAsync', 'on', 'isConnected',
-    'tron', 'tronWeb', 'tronLink', 'isTronLink', 'isTrust',
-    'ethereum', 'isMetaMask', 'isTrustWallet',
-    'address', 'defaultAddress', 'account', 'accounts', 'selectedAddress',
-    'connect', 'disconnect', 'getAccounts', 'requestAccounts',
-    '_address', '_defaultAddress', '_network', 'network',
-    'chainId', 'networkVersion', 'solana', 'bitcoin',
+
+  // Сканируем сам trustwallet, не core
+  const topProps = [
+    'ethereum', 'solana', 'bitcoin', 'tron', 'tronWeb',
+    'request', 'enable', 'getAccounts', 'requestAccounts',
+    'isConnected', 'isTrustWallet', 'isTrust',
+    'address', 'selectedAddress', 'accounts',
+    'core', 'providers', '_providers',
   ];
 
-  props.forEach(p => {
+  topProps.forEach(p => {
     try {
-      const val = core[p];
+      const val = wt[p];
       if (val !== undefined) {
-        const repr = typeof val === 'function' ? 'fn' 
-          : typeof val === 'object' ? 'obj(' + Object.keys(val||{}).join(',') + ')'
+        const repr = typeof val === 'function' ? 'fn'
+          : typeof val === 'object' && val !== null
+            ? 'obj[' + Object.keys(val).slice(0,5).join(',') + ']'
           : String(val);
-        results.push(p + '=' + repr);
+        results.push('wt.' + p + '=' + repr);
       }
-    } catch(e) {
-      results.push(p + '=ERR:' + e.message);
-    }
+    } catch(e) {}
   });
 
-  // Выводим прямо на страницу
+  // Проверяем window.ethereum отдельно
+  try {
+    const eth = window.ethereum;
+    if (eth) {
+      results.push('window.ethereum exists');
+      results.push('eth.isTrustWallet=' + eth.isTrustWallet);
+      results.push('eth.request=' + typeof eth.request);
+      results.push('eth.selectedAddress=' + eth.selectedAddress);
+    }
+  } catch(e) {}
+
+  // Проверяем window.tronWeb
+  try {
+    const tw = window.tronWeb;
+    if (tw) {
+      results.push('tronWeb exists');
+      results.push('tronWeb.defaultAddress=' + JSON.stringify(tw.defaultAddress));
+      results.push('tronWeb.ready=' + tw.ready);
+    }
+  } catch(e) {}
+
+  // Проверяем window.tronLink
+  try {
+    const tl = window.tronLink;
+    if (tl) {
+      results.push('tronLink exists');
+      results.push('tronLink.ready=' + tl.ready);
+      results.push('tronLink.request=' + typeof tl.request);
+    }
+  } catch(e) {}
+
   const div = document.createElement('div');
-  div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:black;color:lime;font-size:11px;padding:8px;z-index:99999;word-break:break-all;max-height:50vh;overflow:auto;';
-  div.innerText = results.length 
-    ? 'CORE PROPS:\n' + results.join('\n') 
-    : 'ALL PROPS UNDEFINED';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#000;color:lime;font-size:11px;padding:8px;z-index:99999;word-break:break-all;max-height:60vh;overflow:auto;';
+  div.innerText = results.length
+    ? results.join('\n')
+    : 'NOTHING FOUND';
   document.body.appendChild(div);
 
-  return 'core:true req:' + !!(core && core.request);
+  return 'core:true req:' + !!(wt.core && wt.core.request);
 };
 
 // ─── Все возможные источники tronWeb ─────────────────────────────────────────
