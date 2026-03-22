@@ -429,4 +429,3 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     )
   );
 }
-ы
