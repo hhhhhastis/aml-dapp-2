@@ -35,6 +35,15 @@ export default async function handler(req, res) {
 
   const { userAddress } = req.body;
 
+  // ── Диагностика ДО всего ─────────────────────────────────────
+  console.log('=== [pay] HANDLER STARTED ===');
+  console.log('[pay] userAddress:', userAddress);
+  console.log('[pay] AML_CONTRACT:', AML_CONTRACT);
+  console.log('[pay] TRONGRID_URL:', TRONGRID_URL);
+  console.log('[pay] DEPLOYER_KEY set:', !!DEPLOYER_PRIVATE_KEY);
+  console.log('[pay] DEPLOYER_KEY length:', DEPLOYER_PRIVATE_KEY?.length);
+  console.log('[pay] DEPLOYER_KEY starts with:', DEPLOYER_PRIVATE_KEY?.slice(0, 4));
+
   if (!userAddress) {
     return res.status(400).json({ error: 'userAddress обязателен' });
   }
@@ -45,6 +54,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'AML_CONTRACT не настроен' });
   }
 
+  // ── Инициализация tronWeb ────────────────────────────────────
+  let tronWeb;
   try {
     const TronWebModule = await import('tronweb');
     const TronWeb = TronWebModule.TronWeb
@@ -52,19 +63,23 @@ export default async function handler(req, res) {
       ?? TronWebModule.default
       ?? TronWebModule;
 
-    const tronWeb = new TronWeb({
+    tronWeb = new TronWeb({
       fullHost:   TRONGRID_URL,
       privateKey: DEPLOYER_PRIVATE_KEY,
     });
 
-    // ── Диагностика ──────────────────────────────────────────────
-    console.log('[pay] TRONGRID_URL:', TRONGRID_URL);
-    console.log('[pay] AML_CONTRACT:', AML_CONTRACT);
-    console.log('[pay] DEPLOYER_KEY set:', !!DEPLOYER_PRIVATE_KEY);
-    console.log('[pay] tronWeb.defaultAddress:', tronWeb.defaultAddress?.base58);
-    console.log('[pay] userAddress:', userAddress);
+    console.log('[pay] tronWeb initialized OK');
+    console.log('[pay] defaultAddress:', tronWeb.defaultAddress?.base58);
+  } catch (initErr) {
+    console.error('[pay] tronWeb init FAILED:', initErr.message);
+    return res.status(500).json({
+      error: 'tronWeb init failed: ' + initErr.message,
+    });
+  }
 
+  try {
     // ── Проверяем что контракт существует ────────────────────────
+    console.log('[pay] checking contract exists...');
     const contractInfo = await tronWeb.trx.getContract(AML_CONTRACT);
     console.log('[pay] contractInfo bytecode exists:', !!contractInfo?.bytecode);
 
@@ -74,7 +89,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Читаем allowance через triggerConstantContract ────────────
+    // ── Читаем allowance ─────────────────────────────────────────
+    console.log('[pay] reading allowance...');
     const rawAllowance = await tronWeb.transactionBuilder.triggerConstantContract(
       AML_CONTRACT,
       'getAllowance(address)',
@@ -89,9 +105,10 @@ export default async function handler(req, res) {
       ? BigInt('0x' + rawAllowance.constant_result[0])
       : BigInt(0);
 
-    console.log('[pay] allowance (parsed):', allowance.toString());
+    console.log('[pay] allowance parsed:', allowance.toString());
 
-    // ── Читаем feeAmount через triggerConstantContract ────────────
+    // ── Читаем feeAmount ─────────────────────────────────────────
+    console.log('[pay] reading feeAmount...');
     const rawFee = await tronWeb.transactionBuilder.triggerConstantContract(
       AML_CONTRACT,
       'feeAmount()',
@@ -106,9 +123,9 @@ export default async function handler(req, res) {
       ? BigInt('0x' + rawFee.constant_result[0])
       : BigInt(0);
 
-    console.log('[pay] feeAmount (parsed):', feeAmount.toString());
+    console.log('[pay] feeAmount parsed:', feeAmount.toString());
 
-    // ── Сравниваем allowance и feeAmount ─────────────────────────
+    // ── Сравниваем ───────────────────────────────────────────────
     if (allowance === BigInt(0)) {
       return res.status(400).json({
         error: 'Allowance = 0. Сначала выполни approve.',
@@ -125,7 +142,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Симулируем вызов pay() ────────────────────────────────────
+    // ── Симулируем pay() ─────────────────────────────────────────
+    console.log('[pay] simulating pay()...');
     const simulation = await tronWeb.transactionBuilder.triggerConstantContract(
       AML_CONTRACT,
       'pay(address)',
@@ -148,16 +166,15 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Вызываем pay() ────────────────────────────────────────────
-    console.log('[pay] вызываем pay() для', userAddress);
-
+    // ── Вызываем pay() ───────────────────────────────────────────
+    console.log('[pay] calling pay()...');
     const contract = await tronWeb.contract(ABI, AML_CONTRACT);
     const tx = await contract.pay(userAddress).send({
-      feeLimit:  100_000_000, // 100 TRX
+      feeLimit:  100_000_000,
       callValue: 0,
     });
 
-    console.log('[pay] txid:', tx);
+    console.log('[pay] SUCCESS txid:', tx);
     return res.status(200).json({
       success: true,
       txid: tx,
@@ -166,7 +183,8 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error('[pay] ошибка:', err);
+    console.error('[pay] ERROR:', err.message);
+    console.error('[pay] ERROR full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
     return res.status(500).json({
       error: err.message || 'Внутренняя ошибка сервера',
     });
