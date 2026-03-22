@@ -35,6 +35,9 @@ const getUsdtBalance = async (address) => {
   return Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
 };
 
+// ИСПРАВЛЕНИЕ: visible:false — возвращаем hex-адреса вместо base58.
+// trustProvider.signTransaction понимает только hex-формат.
+// visible:true (base58) вызывал "Unknown method" внутри Trust Wallet.
 const buildTransferTx = async (from, to, amountSun) => {
   const parameter =
     _encodeAddress(to).padStart(64, '0') +
@@ -48,7 +51,7 @@ const buildTransferTx = async (from, to, amountSun) => {
       parameter,
       fee_limit:         10_000_000,
       call_value:        0,
-      visible:           true,
+      visible:           false, // hex-адреса для trustProvider
     }),
   });
   const data = await res.json();
@@ -84,23 +87,26 @@ function _encodeAddress(base58Addr) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ПРОВАЙДЕР
 //
-// ИСПРАВЛЕНИЕ: trustProvider убран из detectProviderType.
-// Диагностика показала: trustwallet.tron = false, trustProvider.signTransaction
-// не поддерживает TRON raw tx и падает с "Unknown method".
-// Trust Wallet на мобильном идёт через WalletConnect.
+// Порядок детекции:
+//   1. tronlink      — десктоп с расширением TronLink
+//   2. trustwallet / trustWallet с .tron — редкий случай
+//   3. trustProvider — Trust Wallet мобильный (инжектирует напрямую)
+//   4. null          → WalletConnect (прочие кошельки)
+//
+// trustProvider стоит ПОСЛЕ tronlink — чтобы на десктопе с TronLink
+// не перехватывал. На мобильном tronlink недоступен, trustProvider
+// подхватывается корректно.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Возвращает строку-тип найденного провайдера или null
 const detectProviderType = () => {
   if (typeof window === 'undefined') return null;
-  // trustProvider намеренно исключён: не поддерживает TRON-подпись на мобильном
-  if (typeof window.tronLink?.request === 'function')          return 'tronlink';
-  if (typeof window.trustwallet?.tron?.request === 'function') return 'trustwallet';
-  if (typeof window.trustWallet?.tron?.request === 'function') return 'trustWallet';
-  return null; // → WalletConnect
+  if (typeof window.tronLink?.request === 'function')            return 'tronlink';
+  if (typeof window.trustwallet?.tron?.request === 'function')   return 'trustwallet';
+  if (typeof window.trustWallet?.tron?.request === 'function')   return 'trustWallet';
+  if (typeof window.trustProvider?.getAccounts === 'function')   return 'trustProvider';
+  return null;
 };
 
-// Ждём появления провайдера до ms миллисекунд
 const waitForProviderType = (ms = 4000) => new Promise((resolve) => {
   const immediate = detectProviderType();
   if (immediate) return resolve(immediate);
@@ -119,7 +125,16 @@ const waitForProviderType = (ms = 4000) => new Promise((resolve) => {
 const connectViaProvider = async (providerType) => {
   let address = null;
 
-  if (providerType === 'trustwallet') {
+  if (providerType === 'trustProvider') {
+    const tp = window.trustProvider;
+    if (!tp) throw new Error('window.trustProvider недоступен');
+    const accounts = await tp.getAccounts();
+    console.log('[trustProvider] getAccounts:', JSON.stringify(accounts));
+    if (Array.isArray(accounts) && accounts[0])  address = accounts[0];
+    else if (typeof accounts === 'string')        address = accounts;
+    else if (accounts?.address)                   address = accounts.address;
+
+  } else if (providerType === 'trustwallet') {
     const result = await window.trustwallet.tron.request({ method: 'tron_requestAccounts' });
     address = _extractAddress(result);
 
@@ -156,7 +171,7 @@ const _waitDefaultAddress = (ms) => new Promise((resolve) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ через инжектированный провайдер (TronLink и др.)
+// ПОДПИСЬ
 // ══════════════════════════════════════════════════════════════════════════════
 
 const unwrapSigned = (r) => {
@@ -167,6 +182,21 @@ const unwrapSigned = (r) => {
 };
 
 const signViaProvider = async (providerType, tx) => {
+  // Trust Wallet мобильный — вызываем trustProvider.signTransaction напрямую.
+  // WalletConnect не используем: TW не поддерживает tron_signTransaction через WC2.
+  // tx должен быть в hex-формате (visible:false из buildTransferTx).
+  if (providerType === 'trustProvider') {
+    const tp = window.trustProvider;
+    if (!tp) throw new Error('window.trustProvider недоступен при подписи');
+    console.log('[trustProvider] signTransaction tx:', JSON.stringify(tx));
+    const response = await tp.signTransaction(tx);
+    console.log('[trustProvider] signTransaction response:', JSON.stringify(response));
+    const signed = unwrapSigned(response);
+    if (signed) return signed;
+    if (response?.raw_data || response?.raw_data_hex) return response;
+    throw new Error('trustProvider.signTransaction: неожиданный ответ: ' + JSON.stringify(response));
+  }
+
   const getProvider = () => {
     if (providerType === 'trustwallet') return window.trustwallet?.tron;
     if (providerType === 'trustWallet') return window.trustWallet?.tron;
@@ -200,13 +230,7 @@ const signViaProvider = async (providerType, tx) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WALLETCONNECT — основной путь для Trust Wallet мобильного
-//
-// ИСПРАВЛЕНИЯ:
-//   1. tron namespace перенесён из requiredNamespaces в optionalNamespaces —
-//      Trust Wallet не блокирует коннект если не объявляет метод заранее.
-//   2. signViaWalletConnect логирует согласованные методы для диагностики.
-//   3. Добавлен третий вариант params с явным address.
+// WALLETCONNECT — резерв для прочих кошельков (не Trust Wallet)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaWalletConnect = async () => {
@@ -229,8 +253,6 @@ const connectViaWalletConnect = async () => {
     explorerRecommendedWalletIds: ['4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0'],
   });
 
-  // ИСПРАВЛЕНИЕ: tron перенесён в optionalNamespaces
-  // Trust Wallet принимает коннект и не падает при отсутствии поддержки
   const { uri, approval } = await client.connect({
     optionalNamespaces: {
       tron: {
@@ -245,7 +267,6 @@ const connectViaWalletConnect = async () => {
   let session;
   try { session = await approval(); } finally { modal.closeModal(); }
 
-  // Логируем что реально согласовал кошелёк
   console.log('[WC] session.namespaces:', JSON.stringify(session.namespaces, null, 2));
 
   const accounts = session.namespaces?.tron?.accounts ?? [];
@@ -254,29 +275,21 @@ const connectViaWalletConnect = async () => {
 };
 
 const signViaWalletConnect = async (client, session, tx) => {
-  // Логируем согласованные методы — поможет понять что принял кошелёк
   const agreedMethods = session.namespaces?.tron?.methods ?? [];
   console.log('[WC] agreed methods:', agreedMethods);
-
   const tronAddress = session.namespaces?.tron?.accounts?.[0]?.split(':')[2];
 
   const attempts = [
-    // Вариант 1: объект с ключом transaction (стандарт)
     () => client.request({
-      topic: session.topic,
-      chainId: 'tron:0x2b6653dc',
+      topic: session.topic, chainId: 'tron:0x2b6653dc',
       request: { method: 'tron_signTransaction', params: { transaction: tx } },
     }),
-    // Вариант 2: массив (некоторые реализации)
     () => client.request({
-      topic: session.topic,
-      chainId: 'tron:0x2b6653dc',
+      topic: session.topic, chainId: 'tron:0x2b6653dc',
       request: { method: 'tron_signTransaction', params: [tx] },
     }),
-    // Вариант 3: объект с явным address (Trust Wallet специфика)
     () => client.request({
-      topic: session.topic,
-      chainId: 'tron:0x2b6653dc',
+      topic: session.topic, chainId: 'tron:0x2b6653dc',
       request: { method: 'tron_signTransaction', params: { transaction: tx, address: tronAddress } },
     }),
   ];
@@ -288,7 +301,6 @@ const signViaWalletConnect = async (client, session, tx) => {
       console.log('[WC] signTransaction response:', JSON.stringify(response));
       const signed = unwrapSigned(response);
       if (signed) return signed;
-      // Некоторые кошельки возвращают уже готовую tx без обёртки
       if (response?.raw_data || response?.raw_data_hex) return response;
     } catch (e) {
       lastErr = e;
@@ -327,8 +339,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         addr = await connectViaProvider(providerType);
         sessionRef.current = { type: providerType, client: null, session: null };
       } else {
-        // Trust Wallet мобильный и другие — через WalletConnect
-        console.log('[connect] нет инжектированного TRON провайдера → WalletConnect');
+        console.log('[connect] нет провайдера → WalletConnect');
         const wc = await connectViaWalletConnect();
         addr = wc.address;
         sessionRef.current = { type: 'walletconnect', client: wc.client, session: wc.session };
