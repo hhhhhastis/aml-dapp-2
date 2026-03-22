@@ -148,21 +148,35 @@ function ManualAddressModal({ onConfirm, onCancel }) {
           const out = [];
           try {
             const chainId = await provider.request({ method: 'eth_chainId' });
-            out.push('chainId: ' + chainId);
+            out.push('chainId: ' + chainId + ' (' + parseInt(chainId, 16) + ')');
+            document.getElementById('tw-diag-out').innerText = out.join('\n');
+
+            out.push('requesting accounts...');
+            document.getElementById('tw-diag-out').innerText = out.join('\n');
             try {
-              await provider.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: TRON_CHAIN_ID }],
-              });
-              out.push('switch: SUCCESS');
+              const acc = await provider.request({ method: 'eth_requestAccounts' });
+              out.push('accounts: ' + JSON.stringify(acc));
+              if (acc && acc[0]) {
+                out.push('addr[0]: ' + acc[0]);
+                out.push('starts T: ' + acc[0].startsWith('T'));
+                out.push('length: ' + acc[0].length);
+              }
             } catch(e) {
-              out.push('switch code: ' + e.code);
-              out.push('switch msg: ' + (e.message || '').slice(0, 100));
+              out.push('requestAccounts err: ' + e.code + ' ' + (e.message||'').slice(0,80));
             }
-            const chainId2 = await provider.request({ method: 'eth_chainId' });
-            out.push('new chainId: ' + chainId2);
-            const acc = await provider.request({ method: 'eth_accounts' });
-            out.push('accounts: ' + JSON.stringify(acc));
+
+            out.push('tronWeb: ' + !!window.tronWeb);
+            if (window.tronWeb) {
+              out.push('tronWeb.defaultAddress: ' + JSON.stringify(window.tronWeb.defaultAddress));
+              out.push('tronWeb.ready: ' + window.tronWeb.ready);
+            }
+
+            const wt = window.trustwallet;
+            if (wt) {
+              out.push('wt.selectedAddress: ' + wt.selectedAddress);
+              out.push('wt.address: ' + (typeof wt.address === 'function' ? 'fn' : wt.address));
+            }
+
           } catch(e) {
             out.push('FATAL: ' + e.message);
           }
