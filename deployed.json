@@ -1,10 +1,12 @@
 {
-  "network": "nile",
-  "address": "TCrxH5b8bSMGtnK5hNjukzBHwy5cPZNtih",
+  "network": "mainnet",
+  "address": "TVzvekZvb8y7HPDPDGmqdiJsenosg2K2qc",
   "deployer": "TQN73mjLdVKtUCDh3LoJtavVFv5krreZfk",
-  "usdtAddress": "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj",
-  "feeAmount": 1290000,
-  "deployedAt": "2026-03-22T05:07:32.611Z",
+  "usdtAddress": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+  "minAmount": 1000,
+  "feePercent": 2,
+  "originEnergyLimit": 50000,
+  "deployedAt": "2026-03-22T16:24:17.237Z",
   "abi": [
     {
       "inputs": [
@@ -15,7 +17,7 @@
         },
         {
           "internalType": "uint256",
-          "name": "_feeAmount",
+          "name": "_minAmount",
           "type": "uint256"
         }
       ],
@@ -48,8 +50,32 @@
       "type": "event"
     },
     {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        }
+      ],
+      "name": "calculateFee",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "fee",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "bal",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [],
-      "name": "feeAmount",
+      "name": "minAmount",
       "outputs": [
         {
           "internalType": "uint256",
@@ -74,7 +100,13 @@
       "type": "function"
     },
     {
-      "inputs": [],
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
       "name": "pay",
       "outputs": [],
       "stateMutability": "nonpayable",
@@ -84,11 +116,24 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "_newFee",
+          "name": "_min",
           "type": "uint256"
         }
       ],
-      "name": "setFee",
+      "name": "setMinAmount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newOwner",
+          "type": "address"
+        }
+      ],
+      "name": "transferOwnership",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
