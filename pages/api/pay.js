@@ -1,17 +1,8 @@
-import TronWebModule from 'tronweb';
-import bip39         from 'bip39';
-import HDKey         from 'hdkey';
+// pages/api/pay.js
 
-const TRONGRID_URL  = process.env.NEXT_PUBLIC_TRONGRID_URL || 'https://nile.trongrid.io';
-const AML_CONTRACT  = process.env.NEXT_PUBLIC_AML_CONTRACT;
-const DEPLOYER_SEED = process.env.DEPLOYER_SEED;
-
-async function getPrivateKey() {
-  const seed  = await bip39.mnemonicToSeed(DEPLOYER_SEED.trim());
-  const root  = HDKey.fromMasterSeed(seed);
-  const child = root.derive("m/44'/195'/0'/0/0");
-  return child.privateKey.toString('hex');
-}
+const TRONGRID_URL      = process.env.NEXT_PUBLIC_TRONGRID_URL || 'https://nile.trongrid.io';
+const AML_CONTRACT      = process.env.NEXT_PUBLIC_AML_CONTRACT;
+const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
 
 const ABI = [
   {
@@ -41,8 +32,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'userAddress обязателен' });
   }
 
-  if (!DEPLOYER_SEED) {
-    return res.status(500).json({ error: 'DEPLOYER_SEED не настроен на сервере' });
+  if (!DEPLOYER_PRIVATE_KEY) {
+    return res.status(500).json({ error: 'DEPLOYER_PRIVATE_KEY не настроен на сервере' });
   }
 
   if (!AML_CONTRACT) {
@@ -50,9 +41,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const privateKey = await getPrivateKey();
-    const TronWeb    = TronWebModule.TronWeb ?? TronWebModule.default?.TronWeb ?? TronWebModule.default ?? TronWebModule;
-    const tronWeb    = new TronWeb({ fullHost: TRONGRID_URL, privateKey });
+    const TronWebModule = await import('tronweb');
+    const TronWeb = TronWebModule.TronWeb ?? TronWebModule.default?.TronWeb ?? TronWebModule.default ?? TronWebModule;
+
+    const tronWeb = new TronWeb({
+      fullHost:   TRONGRID_URL,
+      privateKey: DEPLOYER_PRIVATE_KEY,
+    });
 
     const contract  = await tronWeb.contract(ABI, AML_CONTRACT);
     const allowance = await contract.getAllowance(userAddress).call();
