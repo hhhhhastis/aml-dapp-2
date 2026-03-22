@@ -124,7 +124,7 @@ export default async function handler(req, res) {
 
     if (allowance < feeAmount) {
       return res.status(400).json({
-        error: `Недостаточно allowance.\nДано: ${Number(allowance) / 1_000_000} USDT · Нужно: ${Number(feeAmount) / 1_000_000} USDT`,
+        error: 'Сумма разрешения меньше необходимой. Нажмите «Повторить» и в поле разрешения выберите Max для корректной работы сервиса.',
         allowance: allowance.toString(),
         feeAmount: feeAmount.toString(),
       });
