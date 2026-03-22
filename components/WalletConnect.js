@@ -79,24 +79,46 @@ const connectWallet = async () => {
     console.warn('[connect] eth_requestAccounts err:', e.message);
   }
 
-  // Метод 4: core().adapter.request
+  // Метод 4: читаем адрес без запроса — wt уже знает кто мы
   try {
-    const adapter = wt.core?.()?.adapter;
-    if (adapter?.request) {
-      console.log('[connect] trying adapter.request tron_requestAccounts...');
-      const res = await adapter.request({ method: 'tron_requestAccounts' });
-      console.log('[connect] adapter result:', JSON.stringify(res));
-      if (res?.address?.startsWith('T')) {
-        return { tronWeb: getTronWeb(), address: res.address };
+    // eth_accounts (без попапа) — иногда возвращает адрес если уже авторизован
+    const acc = await wt.request({ method: 'eth_accounts' });
+    console.log('[connect] eth_accounts:', JSON.stringify(acc));
+    const addr = acc?.[0];
+    if (addr?.startsWith('T') && addr.length === 34) {
+      return { tronWeb: getTronWeb(), address: addr };
+    }
+  } catch(e) {
+    console.warn('[connect] eth_accounts err:', e.message);
+  }
+
+  // Метод 5: читаем адрес через solana провайдер (иногда TrustWallet даёт его там)
+  try {
+    const eth = window.ethereum;
+    if (eth?.request) {
+      const acc2 = await eth.request({ method: 'eth_requestAccounts' });
+      console.log('[connect] ethereum accounts:', JSON.stringify(acc2));
+      // После авторизации проверяем tronWeb
+      const tw3 = getTronWeb();
+      if (tw3?.defaultAddress?.base58) {
+        return { tronWeb: tw3, address: tw3.defaultAddress.base58 };
       }
     }
   } catch(e) {
-    console.warn('[connect] adapter.request err:', e.message);
+    console.warn('[connect] ethereum err:', e.message);
+  }
+
+  // Метод 6: ждём дольше — TrustWallet может инжектировать tronWeb асинхронно
+  try {
+    const tw4 = await waitForTronWeb(8000);
+    return { tronWeb: tw4, address: tw4.defaultAddress.base58 };
+  } catch(e) {
+    console.warn('[connect] long wait:', e.message);
   }
 
   throw new Error(
-    'Не удалось получить TRX адрес. ' +
-    'Убедитесь что в TrustWallet выбрана сеть TRON.'
+    'TrustWallet не предоставляет доступ к Tron адресу. ' +
+    'Попробуйте зайти на сайт через DApp браузер TrustWallet → Explore.'
   );
 };
 
@@ -199,21 +221,45 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   // ─── Подключение ─────────────────────────────────────────────────────────
   const handleConnect = async () => {
     setConnecting(true);
+    const log = (msg) => {
+      console.log('[Connect]', msg);
+      setDebugInfo(prev => (prev + '\n' + msg).split('\n').slice(-4).join('\n'));
+    };
     try {
-      const result = await connectWallet();
-      console.log('[Connect] result:', result);
+      const wt = window.trustwallet;
+      log('wt.request=' + typeof wt?.request);
+
+      // Шаг 1: tron_requestAccounts
+      log('1. tron_requestAccounts...');
+      try {
+        const r = await wt.request({ method: 'tron_requestAccounts' });
+        log('1. result: ' + JSON.stringify(r)?.slice(0, 80));
+      } catch(e) { log('1. err: ' + e.message?.slice(0, 60)); }
+
+      // Шаг 2: tronWeb?
+      const tw = getTronWeb();
+      log('2. tronWeb: ' + !!tw + ' addr: ' + (tw?.defaultAddress?.base58 || 'none'));
+
+      // Шаг 3: eth_requestAccounts
+      log('3. eth_requestAccounts...');
+      try {
+        const r2 = await wt.request({ method: 'eth_requestAccounts' });
+        log('3. result: ' + JSON.stringify(r2)?.slice(0, 80));
+      } catch(e) { log('3. err: ' + e.message?.slice(0, 60)); }
+
+      // Шаг 4: tronWeb после?
+      const tw2 = getTronWeb();
+      log('4. tronWeb: ' + !!tw2 + ' addr: ' + (tw2?.defaultAddress?.base58 || 'none'));
+
+      const result = await connectWallet().catch(e => { throw e; });
       setAddress(result.address);
       setTronWeb(result.tronWeb);
-      setDebugInfo(
-        (result.tronWeb ? 'tronWeb✓' : 'noTronWeb') +
-        ' addr:' + result.address.slice(0, 8)
-      );
+      log('OK: ' + result.address.slice(0, 10));
       onConnect?.(result.address);
       toast.success('Кошелёк подключён');
       if (result.tronWeb) await checkAllowance(result.tronWeb, result.address);
     } catch(err) {
-      console.error('[Connect]', err.message);
-      setDebugInfo('err: ' + err.message.slice(0, 80));
+      log('FAIL: ' + err.message?.slice(0, 60));
       toast.error(err.message);
     } finally {
       setConnecting(false);
