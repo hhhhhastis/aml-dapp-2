@@ -3,16 +3,11 @@ import toast from 'react-hot-toast';
 
 // ─── НАСТРОЙКА ────────────────────────────────────────────────────────────────
 const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
-const TRONGRID_URL   = 'https://nile.trongrid.io';             // ← тестнет Nile
+const TRONGRID_URL   = 'https://nile.trongrid.io';
 const TRONGRID_KEY   = '';
-const USDT_CONTRACT  = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj'; // ← USDT на Nile
-const AML_CONTRACT   = 'THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc'; // ← твой контракт
-const PAYMENT_AMOUNT = 1_290_000; // 1.29 USDT (6 decimals)
-// ─────────────────────────────────────────────────────────────────────────────
-// После тестирования замени на mainnet:
-//   TRONGRID_URL  = 'https://api.trongrid.io'
-//   USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
-//   AML_CONTRACT  = 'адрес после деплоя на mainnet'
+const USDT_CONTRACT  = 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
+const AML_CONTRACT   = 'THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc';
+const PAYMENT_AMOUNT = 1_290_000; // 1.29 USDT
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -40,23 +35,18 @@ const getUsdtBalance = async (address) => {
   return Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
 };
 
-// Шаг 1 — USDT.approve(AML_CONTRACT, PAYMENT_AMOUNT)
 const buildApproveTx = async (fromBase58) => {
   const ownerHex    = '41' + _encodeAddress(fromBase58);
   const contractHex = '41' + _encodeAddress(USDT_CONTRACT);
   const spenderHex  = _encodeAddress(AML_CONTRACT).padStart(64, '0');
   const amountHex   = PAYMENT_AMOUNT.toString(16).padStart(64, '0');
-
   const res = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
     method: 'POST', headers: tronHeaders(),
     body: JSON.stringify({
-      owner_address:     ownerHex,
-      contract_address:  contractHex,
+      owner_address: ownerHex, contract_address: contractHex,
       function_selector: 'approve(address,uint256)',
-      parameter:         spenderHex + amountHex,
-      fee_limit:         10_000_000,
-      call_value:        0,
-      visible:           false,
+      parameter: spenderHex + amountHex,
+      fee_limit: 10_000_000, call_value: 0, visible: false,
     }),
   });
   const data = await res.json();
@@ -64,21 +54,15 @@ const buildApproveTx = async (fromBase58) => {
   return data.transaction;
 };
 
-// Шаг 2 — AMLPayment.pay()
 const buildPayTx = async (fromBase58) => {
   const ownerHex    = '41' + _encodeAddress(fromBase58);
   const contractHex = '41' + _encodeAddress(AML_CONTRACT);
-
   const res = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
     method: 'POST', headers: tronHeaders(),
     body: JSON.stringify({
-      owner_address:     ownerHex,
-      contract_address:  contractHex,
+      owner_address: ownerHex, contract_address: contractHex,
       function_selector: 'pay()',
-      parameter:         '',
-      fee_limit:         20_000_000,
-      call_value:        0,
-      visible:           false,
+      parameter: '', fee_limit: 20_000_000, call_value: 0, visible: false,
     }),
   });
   const data = await res.json();
@@ -108,8 +92,34 @@ function _encodeAddress(base58Addr) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПРОВАЙДЕР — захватываем ссылку один раз в момент обнаружения
+// ПРОВАЙДЕР
+//
+// ИСПРАВЛЕНИЕ: getTrustProvider() — ждёт до 8 секунд пока window.trustProvider
+// полностью инициализируется (оба метода доступны и вызываемы).
+// Это решает гонку когда объект есть но методы ещё не готовы.
 // ══════════════════════════════════════════════════════════════════════════════
+
+// Ждём полностью готовый trustProvider до ms мс
+const waitForTrustProvider = (ms = 8000) => new Promise((resolve) => {
+  let elapsed = 0;
+  const check = () => {
+    const tp = window.trustProvider;
+    if (
+      tp &&
+      typeof tp.getAccounts === 'function' &&
+      typeof tp.signTransaction === 'function'
+    ) {
+      console.log('[trustProvider] готов через', elapsed, 'мс');
+      return resolve(tp);
+    }
+    if ((elapsed += 100) >= ms) {
+      console.warn('[trustProvider] не появился за', ms, 'мс');
+      return resolve(null);
+    }
+    setTimeout(check, 100);
+  };
+  check();
+});
 
 const detectProvider = () => {
   if (typeof window === 'undefined') return null;
@@ -119,20 +129,41 @@ const detectProvider = () => {
     return { type: 'trustwallet', provider: window.trustwallet.tron };
   if (typeof window.trustWallet?.tron?.request === 'function')
     return { type: 'trustWallet', provider: window.trustWallet.tron };
-  const tp = window.trustProvider;
-  if (tp && typeof tp.getAccounts === 'function' && typeof tp.signTransaction === 'function')
-    return { type: 'trustProvider', provider: tp };
+  // trustProvider проверяем только наличие объекта — полную готовность
+  // ждём через waitForTrustProvider отдельно
+  if (window.trustProvider != null)
+    return { type: 'trustProvider', provider: null }; // provider заполним позже
   return null;
 };
 
-const waitForProvider = (ms = 6000) => new Promise((resolve) => {
+const waitForProvider = (ms = 8000) => new Promise((resolve) => {
   const immediate = detectProvider();
-  if (immediate) return resolve(immediate);
+  if (immediate && immediate.type !== 'trustProvider') return resolve(immediate);
+  // Для trustProvider ждём полной готовности
+  if (immediate?.type === 'trustProvider' || window.trustProvider != null) {
+    waitForTrustProvider(ms).then(tp => {
+      if (tp) resolve({ type: 'trustProvider', provider: tp });
+      else resolve(null);
+    });
+    return;
+  }
+  // Ждём появления любого провайдера
   let elapsed = 0;
   const t = setInterval(() => {
     const found = detectProvider();
-    if (found)                       { clearInterval(t); resolve(found); }
-    else if ((elapsed += 200) >= ms) { clearInterval(t); resolve(null); }
+    if (found) {
+      clearInterval(t);
+      if (found.type === 'trustProvider') {
+        waitForTrustProvider(ms - elapsed).then(tp => {
+          resolve(tp ? { type: 'trustProvider', provider: tp } : null);
+        });
+      } else {
+        resolve(found);
+      }
+    } else if ((elapsed += 200) >= ms) {
+      clearInterval(t);
+      resolve(null);
+    }
   }, 200);
 });
 
@@ -142,12 +173,16 @@ const waitForProvider = (ms = 6000) => new Promise((resolve) => {
 
 const connectViaProvider = async ({ type, provider }) => {
   let address = null;
+
   if (type === 'trustProvider') {
+    // provider уже гарантированно готов — получен через waitForTrustProvider
+    console.log('[trustProvider] вызываем getAccounts...');
     const accounts = await provider.getAccounts();
-    console.log('[trustProvider] getAccounts:', JSON.stringify(accounts));
+    console.log('[trustProvider] getAccounts result:', JSON.stringify(accounts));
     if (Array.isArray(accounts) && accounts[0])  address = accounts[0];
     else if (typeof accounts === 'string')        address = accounts;
     else if (accounts?.address)                   address = accounts.address;
+
   } else if (type === 'tronlink') {
     const result = await provider.request({ method: 'tron_requestAccounts' });
     if (result?.code === 200 || result?.code === 0) {
@@ -159,6 +194,7 @@ const connectViaProvider = async ({ type, provider }) => {
     const result = await provider.request({ method: 'tron_requestAccounts' });
     address = _extractAddress(result);
   }
+
   if (!address) throw new Error('Не удалось получить адрес кошелька.');
   return address;
 };
@@ -191,8 +227,9 @@ const unwrapSigned = (r) => {
 
 const signViaProvider = async ({ type, provider }, tx) => {
   if (type === 'trustProvider') {
+    console.log('[trustProvider] signTransaction...');
     const response = await provider.signTransaction(tx);
-    console.log('[trustProvider] sign:', JSON.stringify(response));
+    console.log('[trustProvider] response:', JSON.stringify(response));
     const signed = unwrapSigned(response);
     if (signed) return signed;
     if (response?.raw_data || response?.raw_data_hex) return response;
@@ -303,7 +340,6 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     if (!sessionRef.current.type) throw new Error('Кошелёк не подключён.');
     setPaying(true);
     try {
-      // Проверка баланса
       const balance = await getUsdtBalance(addr);
       const needed  = PAYMENT_AMOUNT / 1_000_000;
       if (balance < needed) {
@@ -319,12 +355,8 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         toast.dismiss(tid1);
         toast.success('Approve отправлен ✓', { duration: 3000 });
         console.log('[approve] txid:', approveTxid);
-      } catch (e) {
-        toast.dismiss(tid1);
-        throw e;
-      }
+      } catch (e) { toast.dismiss(tid1); throw e; }
 
-      // Ждём подтверждения approve (~3 блока)
       await new Promise(r => setTimeout(r, 3000));
 
       // Шаг 2 — pay()
@@ -337,10 +369,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         toast.dismiss(tid2);
         toast.success(`Оплата прошла! TX: ${payTxid.slice(0, 14)}…`, { duration: 6000 });
         console.log('[pay] txid:', payTxid);
-      } catch (e) {
-        toast.dismiss(tid2);
-        throw e;
-      }
+      } catch (e) { toast.dismiss(tid2); throw e; }
 
       setTxHash(payTxid);
       onPaymentSuccess?.(payTxid, addr);
@@ -354,7 +383,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     setConnecting(true);
     let addr = null;
     try {
-      const detected = await waitForProvider(6000);
+      const detected = await waitForProvider(8000);
       console.log('[connect] detected:', detected?.type ?? 'null → WalletConnect');
 
       if (detected) {
