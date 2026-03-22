@@ -1,11 +1,111 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { TrustAdapter } from '@tronweb3/tronwallet-adapter-trust';
 
 const TRON_USDT_CONTRACT  = 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
 const TRON_AML_CONTRACT   = 'TCrxH5b8bSMGtnK5hNjukzBHwy5cPZNtih';
 const TRON_PAYMENT_AMOUNT = 1290000;
 const TRONGRID_URL        = 'https://nile.trongrid.io';
+
+// ─── Получаем tronWeb из всех возможных источников ───────────────────────────
+const getTronWeb = () =>
+  window.tronWeb ||
+  window.trustwallet?.tronWeb ||
+  window.trustwallet?.tronLink?.tronWeb ||
+  null;
+
+// ─── Ждём tronWeb с адресом ───────────────────────────────────────────────────
+const waitForTronWeb = (ms = 10000) => new Promise((resolve, reject) => {
+  const check = () => {
+    const tw = getTronWeb();
+    if (tw?.defaultAddress?.base58) return tw;
+    return null;
+  };
+  const tw = check();
+  if (tw) return resolve(tw);
+  let elapsed = 0;
+  const iv = setInterval(() => {
+    const tw = check();
+    if (tw) { clearInterval(iv); return resolve(tw); }
+    elapsed += 200;
+    if (elapsed >= ms) { clearInterval(iv); reject(new Error('tronWeb timeout')); }
+  }, 200);
+});
+
+// ─── Подключение: запрашиваем разрешение через window.trustwallet ─────────────
+const connectWallet = async () => {
+  const wt = window.trustwallet;
+  const provider = window.ethereum || wt;
+
+  if (!provider?.request) throw new Error('Провайдер не найден');
+
+  // 1. Запрашиваем аккаунты — должен открыть попап
+  let accounts = [];
+  try {
+    accounts = await provider.request({ method: 'eth_requestAccounts' });
+    console.log('[connect] eth_requestAccounts:', accounts);
+  } catch(e) {
+    console.warn('[connect] eth_requestAccounts err:', e.message);
+  }
+
+  // 2. Если tronWeb уже есть — отлично
+  const tw = getTronWeb();
+  if (tw?.defaultAddress?.base58) {
+    return { tronWeb: tw, address: tw.defaultAddress.base58 };
+  }
+
+  // 3. Ждём tronWeb после запроса аккаунтов
+  try {
+    const tw2 = await waitForTronWeb(5000);
+    return { tronWeb: tw2, address: tw2.defaultAddress.base58 };
+  } catch(e) {
+    console.warn('[connect] tronWeb not appeared:', e.message);
+  }
+
+  // 4. Проверяем адрес из accounts — TrustWallet на Tron возвращает TRX адрес
+  const addr = accounts?.[0];
+  if (addr?.startsWith('T') && addr.length === 34) {
+    return { tronWeb: null, address: addr };
+  }
+
+  // 5. Пробуем получить адрес через wt.address()
+  if (typeof wt?.address === 'function') {
+    try {
+      const a = await wt.address();
+      if (a?.startsWith('T')) return { tronWeb: null, address: a };
+    } catch(e) {}
+  }
+
+  throw new Error(
+    'Не удалось получить TRX адрес. ' +
+    'Убедитесь что в TrustWallet выбрана сеть TRON.'
+  );
+};
+
+// ─── Подписываем транзакцию ───────────────────────────────────────────────────
+const signAndBroadcast = async (tronWeb, unsignedTx) => {
+  if (!tronWeb) throw new Error('tronWeb недоступен для подписи');
+  if (!unsignedTx?.txID) throw new Error('Нет транзакции для подписи');
+
+  console.log('[sign] txID:', unsignedTx.txID);
+  let signedTx;
+  try {
+    signedTx = await tronWeb.trx.sign(unsignedTx);
+  } catch(err) {
+    if (err?.message?.includes('Confirmation declined')) throw new Error('Вы отклонили транзакцию');
+    throw new Error('Ошибка подписи: ' + err.message);
+  }
+  if (!signedTx) throw new Error('Транзакция не подписана');
+  if (typeof signedTx === 'string') return signedTx;
+
+  if (signedTx.txID && signedTx.signature) {
+    const broadcast = await tronWeb.trx.sendRawTransaction(signedTx);
+    if (!broadcast.result && broadcast.code !== 'DUP_TRANSACTION_ERROR') {
+      throw new Error('Broadcast failed: ' + (broadcast.message || broadcast.code));
+    }
+    return signedTx.txID;
+  }
+  throw new Error('Неожиданный ответ от sign()');
+};
 
 // ─── encode base58 → hex ──────────────────────────────────────────────────────
 function encodeAddress(base58Addr) {
@@ -36,6 +136,7 @@ function Spinner({ size = 16 }) {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function WalletConnect({ onConnect, onDisconnect, onPaymentSuccess }) {
   const [address, setAddress]           = useState(null);
+  const [tronWeb, setTronWeb]           = useState(null);
   const [connecting, setConnecting]     = useState(false);
   const [approving, setApproving]       = useState(false);
   const [paying, setPaying]             = useState(false);
@@ -43,122 +144,69 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const [txHash, setTxHash]             = useState(null);
   const [debugInfo, setDebugInfo]       = useState('');
 
-  // Создаём адаптер один раз — отключаем deeplink (мы УЖЕ внутри TrustWallet)
-  const adapter = useMemo(() => new TrustAdapter({
-    openUrlWhenWalletNotFound: false,
-    openTrustWalletAppOnMobile: false,
-    checkTimeout: 3000,
-  }), []);
-
-  // tronWeb живёт в window.trustwallet.tronLink.tronWeb (официальная документация)
-  const getTronWeb = () =>
-    window.trustwallet?.tronLink?.tronWeb ||
-    window.tronWeb ||
-    null;
-
+  // Автоподключение если tronWeb уже есть
   useEffect(() => {
-    // Слушаем события адаптера
-    adapter.on('connect', (addr) => {
-      console.log('[TrustAdapter] connect:', addr);
+    const tw = getTronWeb();
+    if (tw?.defaultAddress?.base58) {
+      const addr = tw.defaultAddress.base58;
+      setTronWeb(tw);
       setAddress(addr);
-      setDebugInfo('connected:' + addr.slice(0, 8));
+      setDebugInfo('auto:' + addr.slice(0, 8));
       onConnect?.(addr);
-      const tw = getTronWeb();
-      if (tw) checkAllowance(tw, addr);
-    });
-
-    adapter.on('disconnect', () => {
-      console.log('[TrustAdapter] disconnect');
-      setAddress(null);
-      setHasAllowance(false);
-      setDebugInfo('disconnected');
-      onDisconnect?.();
-    });
-
-    adapter.on('accountsChanged', (addr) => {
-      console.log('[TrustAdapter] accountsChanged:', addr);
-      setAddress(addr);
-    });
-
-    // Если уже подключён
-    if (adapter.connected && adapter.address) {
-      setAddress(adapter.address);
-      setDebugInfo('auto:' + adapter.address.slice(0, 8));
-      onConnect?.(adapter.address);
-      const tw = getTronWeb();
-      if (tw) checkAllowance(tw, adapter.address);
+      checkAllowance(tw, addr);
     } else {
       setDebugInfo(
-        'readyState:' + adapter.readyState +
+        'tw:' + !!window.tronWeb +
         ' wt:' + !!window.trustwallet +
         ' eth:' + !!window.ethereum
       );
     }
+  }, []);
 
-    return () => adapter.removeAllListeners();
-  }, [adapter]);
-
-  // ─── Проверка allowance ──────────────────────────────────────────────────
   const checkAllowance = async (tw, addr) => {
+    if (!tw) return;
     try {
       const contract  = await tw.contract().at(TRON_USDT_CONTRACT);
       const allowance = await contract.allowance(addr, TRON_AML_CONTRACT).call();
       const has = BigInt(allowance.toString()) >= BigInt(TRON_PAYMENT_AMOUNT);
       console.log('[Allowance]', allowance.toString(), '>=', TRON_PAYMENT_AMOUNT, ':', has);
       setHasAllowance(has);
-    } catch (e) {
+    } catch(e) {
       console.error('[Allowance]', e.message);
       setHasAllowance(false);
     }
   };
 
-  // ─── Ждём пока адаптер инициализируется ─────────────────────────────────
-  const waitAdapterReady = (ms = 5000) => new Promise((resolve, reject) => {
-    if (adapter.readyState === 'Found' || adapter.readyState === 'Installed') return resolve();
-    let elapsed = 0;
-    const iv = setInterval(() => {
-      if (adapter.readyState === 'Found' || adapter.readyState === 'Installed') {
-        clearInterval(iv); resolve();
-      }
-      elapsed += 200;
-      if (elapsed >= ms) { clearInterval(iv); reject(new Error('Adapter не готов: ' + adapter.readyState)); }
-    }, 200);
-    // Слушаем событие readyStateChanged
-    adapter.once('readyStateChanged', (state) => {
-      if (state === 'Found' || state === 'Installed') { clearInterval(iv); resolve(); }
-    });
-  });
-
-  // ─── Подключение через TrustAdapter ──────────────────────────────────────
+  // ─── Подключение ─────────────────────────────────────────────────────────
   const handleConnect = async () => {
     setConnecting(true);
     try {
-      console.log('[Connect] readyState:', adapter.readyState);
-      // Если Loading — ждём инициализации
-      if (adapter.readyState === 'Loading') {
-        setDebugInfo('waiting adapter...');
-        await waitAdapterReady(5000);
-      }
-      console.log('[Connect] readyState after wait:', adapter.readyState);
-      await adapter.connect();
-      // адрес придёт через событие 'connect'
-    } catch (err) {
+      const result = await connectWallet();
+      console.log('[Connect] result:', result);
+      setAddress(result.address);
+      setTronWeb(result.tronWeb);
+      setDebugInfo(
+        (result.tronWeb ? 'tronWeb✓' : 'noTronWeb') +
+        ' addr:' + result.address.slice(0, 8)
+      );
+      onConnect?.(result.address);
+      toast.success('Кошелёк подключён');
+      if (result.tronWeb) await checkAllowance(result.tronWeb, result.address);
+    } catch(err) {
       console.error('[Connect]', err.message);
       setDebugInfo('err: ' + err.message.slice(0, 80));
-      toast.error('Ошибка подключения: ' + err.message);
+      toast.error(err.message);
     } finally {
       setConnecting(false);
     }
   };
 
-  // ─── Approve USDT ────────────────────────────────────────────────────────
+  // ─── Approve ─────────────────────────────────────────────────────────────
   const handleApprove = async () => {
+    if (!tronWeb) return toast.error('tronWeb недоступен');
     setApproving(true);
     const tid = toast.loading('Подпишите approve в кошельке…');
     try {
-      const tw = getTronWeb();
-      if (!tw) throw new Error('tronWeb недоступен');
-
       const ownerHex   = '41' + encodeAddress(address);
       const spenderHex = encodeAddress(TRON_AML_CONTRACT).padStart(64, '0');
       const amountHex  = TRON_PAYMENT_AMOUNT.toString(16).padStart(64, '0');
@@ -180,21 +228,11 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       console.log('[Approve] build:', JSON.stringify(data));
       if (!data?.transaction) throw new Error('Не удалось построить approve');
 
-      // Подписываем через TrustAdapter
-      const signed = await adapter.signTransaction(data.transaction);
-      console.log('[Approve] signed:', signed?.txID);
-
-      // Бродкастим
-      const broadcast = await tw.trx.sendRawTransaction(signed);
-      console.log('[Approve] broadcast:', broadcast);
-      if (!broadcast.result && broadcast.code !== 'DUP_TRANSACTION_ERROR') {
-        throw new Error('Broadcast failed: ' + (broadcast.message || broadcast.code));
-      }
-
+      await signAndBroadcast(tronWeb, data.transaction);
       toast.dismiss(tid);
       toast.success('Approve подтверждён!');
       setHasAllowance(true);
-    } catch (err) {
+    } catch(err) {
       toast.dismiss(tid);
       toast.error('Ошибка approve: ' + err.message);
     } finally {
@@ -204,13 +242,10 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
 
   // ─── Pay ─────────────────────────────────────────────────────────────────
   const handlePay = async () => {
+    if (!tronWeb) return toast.error('tronWeb недоступен');
     setPaying(true);
     const tid = toast.loading('Оплата через контракт…');
     try {
-      const tw = getTronWeb();
-      if (!tw) throw new Error('tronWeb недоступен');
-
-      // Получаем неподписанную транзакцию с сервера
       const res = await fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -220,22 +255,12 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       console.log('[Pay] /api/pay:', JSON.stringify(data));
       if (!data?.transaction) throw new Error(data.error || 'Ошибка сервера');
 
-      // Подписываем через TrustAdapter
-      const signed = await adapter.signTransaction(data.transaction);
-      console.log('[Pay] signed:', signed?.txID);
-
-      // Бродкастим
-      const broadcast = await tw.trx.sendRawTransaction(signed);
-      console.log('[Pay] broadcast:', broadcast);
-      if (!broadcast.result && broadcast.code !== 'DUP_TRANSACTION_ERROR') {
-        throw new Error('Broadcast failed: ' + (broadcast.message || broadcast.code));
-      }
-
-      setTxHash(signed.txID);
+      const txid = await signAndBroadcast(tronWeb, data.transaction);
+      setTxHash(txid);
       toast.dismiss(tid);
-      toast.success('Оплата прошла! TX: ' + signed.txID.slice(0, 14) + '…');
-      onPaymentSuccess?.(signed.txID, address);
-    } catch (err) {
+      toast.success('Оплата прошла! TX: ' + txid.slice(0, 14) + '…');
+      onPaymentSuccess?.(txid, address);
+    } catch(err) {
       toast.dismiss(tid);
       toast.error('Ошибка оплаты: ' + err.message);
     } finally {
@@ -244,9 +269,9 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   };
 
   // ─── Disconnect ──────────────────────────────────────────────────────────
-  const handleDisconnect = async () => {
-    try { await adapter.disconnect(); } catch(e) {}
+  const handleDisconnect = () => {
     setAddress(null);
+    setTronWeb(null);
     setTxHash(null);
     setHasAllowance(false);
     setDebugInfo('');
@@ -297,7 +322,9 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         e('i', { className: 'fas fa-check-circle', style: { color: '#10b981' } }),
         e('div', { style: { textAlign: 'right' } },
           e('div', { style: { color: '#60a5fa', fontFamily: 'monospace' } }, fmt(address)),
-          e('div', { style: { fontSize: '0.65rem', color: '#a0b3d9' } }, 'TRON · TrustWallet'),
+          e('div', { style: { fontSize: '0.65rem', color: '#a0b3d9' } },
+            tronWeb ? 'TRON Nile Testnet' : 'TRON (без tronWeb)'
+          ),
           txHash
             ? e('a', {
                 href: 'https://nile.tronscan.org/#/transaction/' + txHash,
@@ -312,7 +339,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         }, e('i', { className: 'fas fa-sign-out-alt' }))
       ),
 
-      !txHash && e('div', { style: { display: 'flex', gap: '0.5rem' } },
+      !txHash && tronWeb && e('div', { style: { display: 'flex', gap: '0.5rem' } },
         !hasAllowance && e('button', {
           onClick: handleApprove, disabled: isBusy,
           style: {
@@ -336,6 +363,17 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
             display: 'flex', alignItems: 'center', gap: '0.5rem',
           }
         }, paying ? e(Spinner, { size: 14 }) : 'Оплатить')
+      ),
+
+      !txHash && !tronWeb && address && e('div', {
+        style: {
+          background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+          borderRadius: '12px', padding: '0.75rem 1rem', maxWidth: '280px', textAlign: 'right',
+        }
+      },
+        e('div', { style: { color: '#f59e0b', fontSize: '0.75rem', fontWeight: '600' } },
+          '⚠️ tronWeb недоступен — подпись невозможна'
+        )
       )
     )
   );
