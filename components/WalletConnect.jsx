@@ -22,9 +22,7 @@ const waitForTronWeb = () => new Promise((resolve, reject) => {
     elapsed += 100;
     if (elapsed >= 10000) {
       clearInterval(interval);
-      reject(new Error(
-        'TronWeb не обнаружен. Откройте сайт через встроенный браузер TrustWallet и убедитесь что активна сеть TRON.'
-      ));
+      reject(new Error('TronWeb не обнаружен. Откройте сайт через встроенный браузер TrustWallet и убедитесь что активна сеть TRON.'));
     }
   }, 100);
 });
@@ -85,13 +83,33 @@ function encodeAddress(base58Addr) {
   return n.toString(16).padStart(50, '0').slice(2, 42);
 }
 
-export default function WalletConnect({ onConnect, onDisconnect, onPaymentSuccess }) {
-  const [address, setAddress]             = useState(null);
-  const [connecting, setConnecting]       = useState(false);
-  const [approving, setApproving]         = useState(false);
-  const [paying, setPaying]               = useState(false);
-  const [hasAllowance, setHasAllowance]   = useState(false);
-  const [txHash, setTxHash]               = useState(null);
+function Spinner(props) {
+  const size = props.size || 16;
+  return React.createElement('span', {
+    style: {
+      display: 'inline-block',
+      width: size,
+      height: size,
+      border: '2px solid rgba(255,255,255,0.3)',
+      borderTopColor: '#fff',
+      borderRadius: '50%',
+      animation: 'spin 0.7s linear infinite',
+      flexShrink: 0,
+    }
+  });
+}
+
+export default function WalletConnect(props) {
+  const onConnect = props.onConnect;
+  const onDisconnect = props.onDisconnect;
+  const onPaymentSuccess = props.onPaymentSuccess;
+
+  const [address, setAddress]           = useState(null);
+  const [connecting, setConnecting]     = useState(false);
+  const [approving, setApproving]       = useState(false);
+  const [paying, setPaying]             = useState(false);
+  const [hasAllowance, setHasAllowance] = useState(false);
+  const [txHash, setTxHash]             = useState(null);
 
   useEffect(() => {
     let elapsed = 0;
@@ -218,132 +236,90 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const fmt = (a) => a.slice(0, 6) + '...' + a.slice(-4);
   const isBusy = connecting || approving || paying;
 
-  return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' }}>
-      {!address ? (
-        <button
-          onClick={handleConnect}
-          disabled={connecting}
-          style={{
-            background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '40px',
-            padding: '1rem 2rem',
-            fontSize: '1rem',
-            fontWeight: '600',
-            cursor: connecting ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.8rem',
-            opacity: connecting ? 0.7 : 1,
-            transition: 'all 0.2s',
-          }}
-        >
-          {connecting ? <Spinner /> : <i className="fas fa-wallet" />}
-          {connecting ? 'Подключение...' : 'Подключить кошелёк'}
-        </button>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-          <div style={{
-            background: 'rgba(59,130,246,0.1)',
-            border: '1px solid rgba(59,130,246,0.2)',
-            borderRadius: '40px',
-            padding: '0.8rem 1.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem',
-          }}>
-            <i className="fas fa-check-circle" style={{ color: '#10b981' }} />
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ color: '#60a5fa', fontFamily: 'monospace' }}>{fmt(address)}</div>
-              <div style={{ fontSize: '0.65rem', color: '#a0b3d9' }}>TRON Network</div>
-              {txHash ? (
-                <a
-                  href={'https://nile.tronscan.org/#/transaction/' + txHash}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }}
-                >
-                  Оплачено · Scan
-                </a>
-              ) : (
-                <div style={{ fontSize: '0.72rem', color: '#f59e0b' }}>Ожидание оплаты</div>
-              )}
-            </div>
-            <button
-              onClick={handleDisconnect}
-              style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}
-            >
-              <i className="fas fa-sign-out-alt" />
-            </button>
-          </div>
+  const e = React.createElement;
 
-          {!txHash && (
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {!hasAllowance && (
-                <button
-                  onClick={handleApprove}
-                  disabled={isBusy}
-                  style={{
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '40px',
-                    padding: '0.6rem 1.5rem',
-                    fontSize: '0.9rem',
-                    fontWeight: '600',
-                    cursor: isBusy ? 'not-allowed' : 'pointer',
-                    opacity: isBusy ? 0.7 : 1,
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                  }}
-                >
-                  {approving ? <Spinner size={14} /> : 'Разрешить оплату'}
-                </button>
-              )}
-              <button
-                onClick={handlePay}
-                disabled={isBusy || !hasAllowance}
-                style={{
-                  background: hasAllowance ? '#10b981' : '#9ca3af',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '40px',
-                  padding: '0.6rem 1.5rem',
-                  fontSize: '0.9rem',
-                  fontWeight: '600',
-                  cursor: (!hasAllowance || isBusy) ? 'not-allowed' : 'pointer',
-                  opacity: (!hasAllowance || isBusy) ? 0.5 : 1,
-                  transition: 'all 0.2s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                {paying ? <Spinner size={14} /> : 'Оплатить'}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+  if (!address) {
+    return e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' } },
+      e('button', {
+        onClick: handleConnect,
+        disabled: connecting,
+        style: {
+          background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
+          color: 'white', border: 'none', borderRadius: '40px',
+          padding: '1rem 2rem', fontSize: '1rem', fontWeight: '600',
+          cursor: connecting ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', gap: '0.8rem',
+          opacity: connecting ? 0.7 : 1, transition: 'all 0.2s',
+        }
+      },
+        connecting ? e(Spinner, null) : e('i', { className: 'fas fa-wallet' }),
+        connecting ? 'Подключение...' : 'Подключить кошелёк'
+      )
+    );
+  }
 
-function Spinner({ size = 16 }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      width: size,
-      height: size,
-      border: '2px solid rgba(255,255,255,0.3)',
-      borderTopColor: '#fff',
-      borderRadius: '50%',
-      animation: 'spin 0.7s linear infinite',
-      flexShrink: 0,
-    }} />
+  return e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' } },
+    e('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' } },
+
+      // Бейдж с адресом
+      e('div', {
+        style: {
+          background: 'rgba(59,130,246,0.1)',
+          border: '1px solid rgba(59,130,246,0.2)',
+          borderRadius: '40px', padding: '0.8rem 1.5rem',
+          display: 'flex', alignItems: 'center', gap: '1rem',
+        }
+      },
+        e('i', { className: 'fas fa-check-circle', style: { color: '#10b981' } }),
+        e('div', { style: { textAlign: 'right' } },
+          e('div', { style: { color: '#60a5fa', fontFamily: 'monospace' } }, fmt(address)),
+          e('div', { style: { fontSize: '0.65rem', color: '#a0b3d9' } }, 'TRON Network'),
+          txHash
+            ? e('a', {
+                href: 'https://nile.tronscan.org/#/transaction/' + txHash,
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                style: { fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }
+              }, 'Оплачено · Scan')
+            : e('div', { style: { fontSize: '0.72rem', color: '#f59e0b' } }, 'Ожидание оплаты')
+        ),
+        e('button', {
+          onClick: handleDisconnect,
+          style: { background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }
+        }, e('i', { className: 'fas fa-sign-out-alt' }))
+      ),
+
+      // Кнопки approve и pay
+      !txHash && e('div', { style: { display: 'flex', gap: '0.5rem' } },
+        !hasAllowance && e('button', {
+          onClick: handleApprove,
+          disabled: isBusy,
+          style: {
+            background: '#3b82f6', color: 'white', border: 'none',
+            borderRadius: '40px', padding: '0.6rem 1.5rem',
+            fontSize: '0.9rem', fontWeight: '600',
+            cursor: isBusy ? 'not-allowed' : 'pointer',
+            opacity: isBusy ? 0.7 : 1, transition: 'all 0.2s',
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+          }
+        },
+          approving ? e(Spinner, { size: 14 }) : 'Разрешить оплату'
+        ),
+        e('button', {
+          onClick: handlePay,
+          disabled: isBusy || !hasAllowance,
+          style: {
+            background: hasAllowance ? '#10b981' : '#9ca3af',
+            color: 'white', border: 'none', borderRadius: '40px',
+            padding: '0.6rem 1.5rem', fontSize: '0.9rem', fontWeight: '600',
+            cursor: (!hasAllowance || isBusy) ? 'not-allowed' : 'pointer',
+            opacity: (!hasAllowance || isBusy) ? 0.5 : 1, transition: 'all 0.2s',
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+          }
+        },
+          paying ? e(Spinner, { size: 14 }) : 'Оплатить'
+        )
+      )
+    )
   );
 }
