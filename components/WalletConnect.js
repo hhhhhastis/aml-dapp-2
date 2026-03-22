@@ -2,12 +2,13 @@ import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 
 // ─── НАСТРОЙКА ────────────────────────────────────────────────────────────────
-const WC_PROJECT_ID  = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_WC_PROJECT_ID';
+const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
 const TRONGRID_URL   = 'https://api.trongrid.io';
-const TRONGRID_KEY   = process.env.NEXT_PUBLIC_TRONGRID_KEY || '';
+const TRONGRID_KEY   = '';
 const USDT_CONTRACT  = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-const PAYMENT_TO     = process.env.NEXT_PUBLIC_PAYMENT_ADDRESS || 'TYourReceiverAddressHere';
-const PAYMENT_AMOUNT = 1_290_000; // 1.29 USDT
+const PAYMENT_TO     = 'TWZpvLFsSus5r3uLcyX3h3pUgCR35TJn8m';
+const PAYMENT_AMOUNT = 100_000; // 0.10 USDT (1 USDT = 1 000 000 sun)
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TRONGRID API
@@ -82,26 +83,14 @@ function _encodeAddress(base58Addr) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ОПРЕДЕЛЕНИЕ ПРОВАЙДЕРА
-//
-// Диагностика показала что в новом TrustWallet:
-//   window.trustwallet.tron  → НЕТ (старый путь не работает)
-//   window.trustwalletTon    → ЕСТЬ (новое название TRON провайдера)
-//   window.trustProvider     → ЕСТЬ (универсальный провайдер)
-//
-// Порядок поиска: trustwalletTon → trustwallet.tron → trustWallet.tron → tronLink
 // ══════════════════════════════════════════════════════════════════════════════
 
 const getTronProvider = () => {
   if (typeof window === 'undefined') return null;
-
-  // ★ НОВЫЙ TrustWallet — window.trustwalletTon (найдено диагностикой)
   if (window.trustwalletTon)        return { type: 'trustwalletTon', obj: window.trustwalletTon };
-
-  // Старые варианты на случай других версий
   if (window.trustwallet?.tron)     return { type: 'trustwallet',    obj: window.trustwallet.tron };
   if (window.trustWallet?.tron)     return { type: 'trustwallet',    obj: window.trustWallet.tron };
   if (window.tronLink)              return { type: 'tronlink',       obj: window.tronLink };
-
   return null;
 };
 
@@ -121,21 +110,13 @@ const waitForTronProvider = (ms = 4000) => new Promise((resolve) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaTronProvider = async (provider) => {
-  // tron_requestAccounts — стандартный метод для всех TRON провайдеров TrustWallet
   const result = await provider.obj.request({ method: 'tron_requestAccounts' });
-
   let address = null;
-
-  // trustwalletTon возвращает массив адресов напрямую
   if (Array.isArray(result) && result[0]) {
     address = result[0];
-  }
-  // Или объект с адресом
-  else if (result?.address) {
+  } else if (result?.address) {
     address = result.address;
-  }
-  // TronLink возвращает { code: 200 }
-  else if (result?.code === 200 || result?.code === 0) {
+  } else if (result?.code === 200 || result?.code === 0) {
     address = await new Promise((resolve) => {
       let n = 0;
       const t = setInterval(() => {
@@ -144,13 +125,12 @@ const connectViaTronProvider = async (provider) => {
       }, 100);
     });
   }
-
   if (!address) throw new Error('Не удалось получить адрес кошелька.');
   return address;
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ — перебираем все форматы params
+// ПОДПИСЬ — перебор форматов params
 // ══════════════════════════════════════════════════════════════════════════════
 
 const unwrapSigned = (response) => {
@@ -161,20 +141,17 @@ const unwrapSigned = (response) => {
 };
 
 const signViaTronProvider = async (provider, tx) => {
-  // Три варианта формата params — перебираем по очереди
   const attempts = [
     () => provider.obj.request({ method: 'tron_signTransaction', params: { transaction: tx } }),
     () => provider.obj.request({ method: 'tron_signTransaction', params: [tx] }),
     () => provider.obj.request({ method: 'tron_signTransaction', params: tx }),
   ];
-
   let lastErr;
   for (const attempt of attempts) {
     try {
       const response = await attempt();
       const signed   = unwrapSigned(response);
       if (signed) return signed;
-      console.warn('[sign] ответ без signature:', response);
     } catch (e) {
       lastErr = e;
       if (e.code === 4001 || /reject|cancel|denied/i.test(e.message ?? '')) throw e;
@@ -182,7 +159,6 @@ const signViaTronProvider = async (provider, tx) => {
       throw e;
     }
   }
-
   throw new Error('Не удалось подписать транзакцию.\n' + (lastErr?.message ?? ''));
 };
 
@@ -191,9 +167,6 @@ const signViaTronProvider = async (provider, tx) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaWalletConnect = async () => {
-  if (WC_PROJECT_ID === 'YOUR_WC_PROJECT_ID') {
-    throw new Error('WalletConnect не настроен. Укажи NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID в .env.local');
-  }
   const { SignClient }         = await import('@walletconnect/sign-client');
   const { WalletConnectModal } = await import('@walletconnect/modal');
 
@@ -262,10 +235,6 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const isBusy = connecting || paying;
 
   const connectAndPay = async () => {
-    if (PAYMENT_TO === 'TYourReceiverAddressHere') {
-      toast.error('Укажи NEXT_PUBLIC_PAYMENT_ADDRESS в .env.local');
-      return;
-    }
     setConnecting(true);
     let addr = null;
     try {
@@ -350,7 +319,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       {!address ? (
         <button onClick={connectAndPay} disabled={isBusy} style={btnStyle(isBusy)}>
           {isBusy ? <Spinner /> : <i className="fas fa-wallet" />}
-          {connecting ? 'Подключение...' : paying ? 'Ожидание оплаты...' : 'Подключить кошелёк · $1.29'}
+          {connecting ? 'Подключение...' : paying ? 'Ожидание оплаты...' : 'Подключить кошелёк · $0.10'}
         </button>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'0.5rem' }}>
