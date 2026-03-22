@@ -14,9 +14,9 @@ const tronHeaders = () => ({
 });
 
 const getUsdtBalance = async (address) => {
-  console.log('[balance] адрес:', address);
-  console.log('[balance] TRONGRID_URL:', TRONGRID_URL);
-  console.log('[balance] USDT_CONTRACT:', USDT_CONTRACT);
+  toast(`Читаем баланс...\nАдрес: ${address.slice(0,10)}`, { duration: 5000 });
+  toast(`URL: ${TRONGRID_URL.slice(0,30)}`, { duration: 5000 });
+  toast(`USDT: ${USDT_CONTRACT.slice(0,10)}`, { duration: 5000 });
 
   const res = await fetch(`${TRONGRID_URL}/wallet/triggerconstantcontract`, {
     method: 'POST', headers: tronHeaders(),
@@ -29,13 +29,10 @@ const getUsdtBalance = async (address) => {
     }),
   });
   const data = await res.json();
-  console.log('[balance] ответ API:', JSON.stringify(data));
-
-  const hex = data?.constant_result?.[0] ?? '0';
-  console.log('[balance] hex:', hex);
-
+  const hex  = data?.constant_result?.[0] ?? '0';
   const balance = Number(BigInt('0x' + (hex || '0'))) / 1_000_000;
-  console.log('[balance] итог:', balance);
+  
+  toast(`Баланс: ${balance} USDT`, { duration: 8000 });
   return balance;
 };
 
