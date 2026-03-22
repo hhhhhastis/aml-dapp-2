@@ -25,12 +25,15 @@ function Diag2() {
   const testGetAccounts = async () => {
     try {
       add('Пробуем getAccounts (callback)...');
-      const res = await new Promise((resolve, reject) => {
-        window.trustProvider.getAccounts((err, accounts) => {
-          if (err) reject(new Error(JSON.stringify(err)));
-          else resolve(accounts);
-        });
-      });
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.getAccounts((err, accounts) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(accounts);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 5s')), 5000))
+      ]);
       add('Результат: ' + JSON.stringify(res));
     } catch(e) { add('Ошибка: ' + e.message); }
   };
@@ -81,14 +84,42 @@ function Diag2() {
     } catch(e) { add('Ошибка: ' + e.message); }
   };
 
+  const testSignTransaction = async () => {
+    try {
+      add('Пробуем signTransaction (callback)...');
+      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          window.trustProvider.signTransaction(fakeTx, (err, result) => {
+            if (err) reject(new Error(JSON.stringify(err)));
+            else resolve(result);
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 10s')), 10000))
+      ]);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
+  const testSignTransaction2 = async () => {
+    try {
+      add('Пробуем signTransaction (promise)...');
+      const fakeTx = { txID: 'test', raw_data: {}, raw_data_hex: '' };
+      const res = await window.trustProvider.signTransaction(fakeTx);
+      add('Результат: ' + JSON.stringify(res));
+    } catch(e) { add('Ошибка: ' + e.message); }
+  };
+
   return (
     <div style={{ padding: '1rem', background: '#0f192d', minHeight: '100vh', color: '#fff', fontFamily: 'monospace' }}>
       <h2>🔬 Диагностика Trust Wallet</h2>
-      <button onClick={testGetAccounts}    style={btnStyle('#f59e0b')}>getAccounts (callback)</button>
-      <button onClick={testGetAccounts2}   style={btnStyle('#8b5cf6')}>getAccounts (promise)</button>
-      <button onClick={testEth}            style={btnStyle('#10b981')}>eth_accounts</button>
-      <button onClick={testInspect}        style={btnStyle('#e11d48')}>Inspect trustProvider</button>
-      <button onClick={testCallbackFixed}  style={btnStyle('#0891b2')}>getAccounts + timeout</button>
+      <button onClick={testGetAccounts}     style={btnStyle('#f59e0b')}>getAccounts (callback)</button>
+      <button onClick={testGetAccounts2}    style={btnStyle('#8b5cf6')}>getAccounts (promise)</button>
+      <button onClick={testEth}             style={btnStyle('#10b981')}>eth_accounts</button>
+      <button onClick={testInspect}         style={btnStyle('#e11d48')}>Inspect trustProvider</button>
+      <button onClick={testCallbackFixed}   style={btnStyle('#0891b2')}>getAccounts + timeout</button>
+      <button onClick={testSignTransaction}  style={btnStyle('#dc2626')}>signTransaction (callback)</button>
+      <button onClick={testSignTransaction2} style={btnStyle('#7c3aed')}>signTransaction (promise)</button>
       <div style={{ marginTop: '1rem', background: '#1a2744', padding: '1rem', borderRadius: '8px' }}>
         {log.map((l, i) => (
           <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #2d3f6b', fontSize: '0.85rem' }}>{l}</div>
