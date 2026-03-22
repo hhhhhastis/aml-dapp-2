@@ -188,43 +188,49 @@ function ManualAddressModal({ onConfirm, onCancel }) {
               } catch(e) {
                 out.push('wt.getAccounts err: ' + e.message);
               }
-              // Полный скан adapter через for...in и prototype
+              // adapter.request найден — пробуем все Tron методы
               try {
                 const core = wt.core();
                 const adapter = core && core.adapter;
-                out.push('adapter type: ' + typeof adapter);
 
-                // for...in — раскрывает Proxy и prototype методы
-                const found = [];
+                // Пробуем tron_requestAccounts
                 try {
-                  for (const k in adapter) { found.push(k); }
-                  out.push('for-in keys: ' + JSON.stringify(found.slice(0, 20)));
-                } catch(e) { out.push('for-in err: ' + e.message); }
-
-                // Известные методы TronWeb Adapter (из @tronweb3/tronwallet-adapters)
-                const methods = ['connect','disconnect','signTransaction',
-                  'signMessage','request','getAccount','account',
-                  'address','network','ready','readyState','name',
-                  'icon','url','supportedTransactionVersions'];
-                for (const m of methods) {
-                  try {
-                    const v = adapter[m];
-                    if (v !== undefined) out.push('adapter.' + m + ': ' + typeof v + ' ' + String(v).slice(0,50));
-                  } catch(e) {}
+                  out.push('trying tron_requestAccounts...');
+                  document.getElementById('tw-diag-out').innerText = out.join('\n');
+                  const r = await adapter.request({ method: 'tron_requestAccounts' });
+                  out.push('tron_requestAccounts: ' + JSON.stringify(r));
+                } catch(e) {
+                  out.push('tron_requestAccounts err: code=' + e.code + ' msg=' + (e.message||'').slice(0,60));
                 }
 
-                // Пробуем connect напрямую если нашли
-                if (typeof adapter.connect === 'function') {
-                  try {
-                    const r = await adapter.connect();
-                    out.push('adapter.connect() OK: ' + JSON.stringify(r));
-                  } catch(e) {
-                    out.push('adapter.connect err: ' + e.message?.slice(0,80));
-                  }
+                // Пробуем eth_requestAccounts через adapter
+                try {
+                  out.push('trying eth_requestAccounts...');
+                  document.getElementById('tw-diag-out').innerText = out.join('\n');
+                  const r2 = await adapter.request({ method: 'eth_requestAccounts' });
+                  out.push('eth_requestAccounts: ' + JSON.stringify(r2));
+                } catch(e) {
+                  out.push('eth_requestAccounts err: code=' + e.code + ' msg=' + (e.message||'').slice(0,60));
+                }
+
+                // Получаем адрес и chainId
+                try {
+                  const chainId = await adapter.request({ method: 'eth_chainId' });
+                  out.push('adapter chainId: ' + chainId);
+                  const acc = await adapter.request({ method: 'eth_accounts' });
+                  out.push('adapter accounts: ' + JSON.stringify(acc));
+                } catch(e) {
+                  out.push('adapter chainId/acc err: ' + e.message?.slice(0,60));
+                }
+
+                // Проверяем есть ли tronWeb после запросов
+                out.push('tronWeb after: ' + !!window.tronWeb);
+                if (window.tronWeb?.defaultAddress?.base58) {
+                  out.push('tronWeb addr: ' + window.tronWeb.defaultAddress.base58);
                 }
 
               } catch(e) {
-                out.push('adapter scan err: ' + e.message);
+                out.push('adapter.request scan err: ' + e.message);
               }
             }
 
