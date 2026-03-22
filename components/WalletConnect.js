@@ -201,57 +201,50 @@ export default function WalletConnect(props) {
 
   // ─── Подключение ────────────────────────────────────────────────────────────
   const handleConnect = async () => {
-    setConnecting(true);
-    try {
-      console.log('[Connect] window.tronWeb:', !!window.tronWeb);
-      console.log('[Connect] window.tronLink:', !!window.tronLink);
-      console.log('[Connect] window.trustwallet:', !!window.trustwallet);
-      if (window.trustwallet) {
-        console.log('[Connect] trustwallet keys:', Object.keys(window.trustwallet).join(', '));
+  setConnecting(true);
+  try {
+    console.log('[Connect] пробуем trustwallet.request...');
+    
+    // Новый способ — через универсальный провайдер
+    if (window.trustwallet && window.trustwallet.request) {
+      try {
+        const accounts = await window.trustwallet.request({
+          method: 'tron_requestAccounts',
+        });
+        console.log('[Connect] tron_requestAccounts:', JSON.stringify(accounts));
+      } catch (e) {
+        console.warn('[Connect] tron_requestAccounts failed:', e.message);
       }
-
-      // Пробуем запросить доступ через все варианты
-      const tw = getTronWeb();
-      if (tw && tw.request) {
-        try {
-          await tw.request({ method: 'tron_requestAccounts' });
-          console.log('[Connect] tw.request успешно');
-        } catch (e) {
-          console.warn('[Connect] tw.request:', e.message);
-        }
-      }
-      if (window.tronLink && window.tronLink.request) {
-        try {
-          await window.tronLink.request({ method: 'tron_requestAccounts' });
-          console.log('[Connect] tronLink.request успешно');
-        } catch (e) {
-          console.warn('[Connect] tronLink.request:', e.message);
-        }
-      }
-      if (window.trustwallet && window.trustwallet.request) {
-        try {
-          await window.trustwallet.request({ method: 'tron_requestAccounts' });
-          console.log('[Connect] trustwallet.request успешно');
-        } catch (e) {
-          console.warn('[Connect] trustwallet.request:', e.message);
-        }
-      }
-
-      const tronWeb = await waitForTronWeb();
-      const addr    = tronWeb.defaultAddress.base58;
-
-      console.log('[Connect] подключён:', addr);
-      setAddress(addr);
-      onConnect && onConnect(addr);
-      toast.success('Кошелёк подключён');
-      await checkAllowance(tronWeb, addr);
-    } catch (err) {
-      console.error('[Connect] ошибка:', err.message);
-      toast.error(err.message);
-    } finally {
-      setConnecting(false);
     }
-  };
+
+    // Ждём tronWeb
+    const tronWeb = await waitForTronWeb();
+    const addr = tronWeb.defaultAddress.base58;
+    setAddress(addr);
+    onConnect && onConnect(addr);
+    toast.success('Кошелёк подключён');
+    await checkAllowance(tronWeb, addr);
+  } catch (err) {
+    console.error('[Connect]', err.message);
+
+    // Если tronWeb так и не появился — пробуем достать адрес через trustwallet напрямую
+    if (window.trustwallet && window.trustwallet.request) {
+      try {
+        const result = await window.trustwallet.request({
+          method: 'eth_requestAccounts',
+        });
+        console.log('[Connect] eth_requestAccounts result:', JSON.stringify(result));
+        toast.error('Получили ETH аккаунт — нужен TRON. Переключите сеть на TRON в TrustWallet.');
+      } catch (e2) {
+        console.warn('[Connect] eth_requestAccounts failed:', e2.message);
+      }
+    }
+
+    toast.error(err.message);
+  } finally {
+    setConnecting(false);
+  }
+};
 
   // ─── Approve ────────────────────────────────────────────────────────────────
   const handleApprove = async () => {
@@ -292,32 +285,32 @@ export default function WalletConnect(props) {
   };
 
   // ─── Pay ────────────────────────────────────────────────────────────────────
-  const handlePay = async () => {
-    setPaying(true);
-    const tid = toast.loading('Оплата через контракт…');
-    try {
-      const txid = await sendTronTransaction(async () => {
-        const res = await fetch('/api/pay', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ userAddress: address }),
+    const handlePay = async () => {
+      setPaying(true);
+      const tid = toast.loading('Оплата через контракт…');
+      try {
+        const txid = await sendTronTransaction(async () => {
+          const res = await fetch('/api/pay', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ userAddress: address }),
+          });
+          const data = await res.json();
+          console.log('[Pay] response:', JSON.stringify(data));
+          if (!data || !data.transaction) throw new Error(data.error || 'Ошибка сервера');
+          return data.transaction;
         });
-        const data = await res.json();
-        console.log('[Pay] response:', JSON.stringify(data));
-        if (!data || !data.transaction) throw new Error(data.error || 'Ошибка сервера');
-        return data.transaction;
-      });
-      setTxHash(txid);
-      toast.dismiss(tid);
-      toast.success('Оплата прошла! TX: ' + txid.slice(0, 14) + '…');
-      onPaymentSuccess && onPaymentSuccess(txid, address);
-    } catch (err) {
-      toast.dismiss(tid);
-      toast.error('Ошибка оплаты: ' + err.message);
-    } finally {
-      setPaying(false);
-    }
-  };
+        setTxHash(txid);
+        toast.dismiss(tid);
+        toast.success('Оплата прошла! TX: ' + txid.slice(0, 14) + '…');
+        onPaymentSuccess && onPaymentSuccess(txid, address);
+      } catch (err) {
+        toast.dismiss(tid);
+        toast.error('Ошибка оплаты: ' + err.message);
+      } finally {
+        setPaying(false);
+      }
+    };
 
   // ─── Disconnect ─────────────────────────────────────────────────────────────
   const handleDisconnect = () => {
