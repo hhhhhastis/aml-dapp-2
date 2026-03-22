@@ -7,7 +7,7 @@ const TRONGRID_URL   = 'https://api.trongrid.io';
 const TRONGRID_KEY   = '';
 const USDT_CONTRACT  = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const PAYMENT_TO     = 'TWZpvLFsSus5r3uLcyX3h3pUgCR35TJn8m';
-const PAYMENT_AMOUNT = 100_000; // 0.10 USDT (1 USDT = 1 000 000 sun)
+const PAYMENT_AMOUNT = 100_000; // 0.10 USDT
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -83,14 +83,28 @@ function _encodeAddress(base58Addr) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ОПРЕДЕЛЕНИЕ ПРОВАЙДЕРА
+//
+// Диагностика показала точную картину:
+//   window.trustProvider              → есть, ключи: signTransaction, getAccounts
+//   window.trustProvider.signTransaction → function  ← TRON подпись здесь
+//   window.trustProvider.getAccounts     → function  ← TRON адрес здесь
+//   window.trustwallet.tron           → false (TRON нет в trustwallet)
+//   window.trustwalletTon             → TON, не TRON (разные сети!)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const getTronProvider = () => {
   if (typeof window === 'undefined') return null;
-  if (window.trustwalletTon)        return { type: 'trustwalletTon', obj: window.trustwalletTon };
-  if (window.trustwallet?.tron)     return { type: 'trustwallet',    obj: window.trustwallet.tron };
-  if (window.trustWallet?.tron)     return { type: 'trustwallet',    obj: window.trustWallet.tron };
-  if (window.tronLink)              return { type: 'tronlink',       obj: window.tronLink };
+
+  // ★ Правильный провайдер: window.trustProvider (найдено диагностикой)
+  if (window.trustProvider?.getAccounts) {
+    return { type: 'trustProvider', obj: window.trustProvider };
+  }
+
+  // Старые варианты — fallback для других версий TrustWallet
+  if (window.trustwallet?.tron?.request) return { type: 'trustwallet', obj: window.trustwallet.tron };
+  if (window.trustWallet?.tron?.request) return { type: 'trustwallet', obj: window.trustWallet.tron };
+  if (window.tronLink?.request)          return { type: 'tronlink',    obj: window.tronLink };
+
   return null;
 };
 
@@ -110,27 +124,38 @@ const waitForTronProvider = (ms = 4000) => new Promise((resolve) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const connectViaTronProvider = async (provider) => {
-  const result = await provider.obj.request({ method: 'tron_requestAccounts' });
   let address = null;
-  if (Array.isArray(result) && result[0]) {
-    address = result[0];
-  } else if (result?.address) {
-    address = result.address;
-  } else if (result?.code === 200 || result?.code === 0) {
-    address = await new Promise((resolve) => {
-      let n = 0;
-      const t = setInterval(() => {
-        const addr = provider.obj.defaultAddress?.base58 || window.tronWeb?.defaultAddress?.base58;
-        if (addr || ++n > 20) { clearInterval(t); resolve(addr ?? null); }
-      }, 100);
-    });
+
+  if (provider.type === 'trustProvider') {
+    // window.trustProvider.getAccounts() — возвращает TRON адреса
+    const accounts = await provider.obj.getAccounts();
+    if (Array.isArray(accounts) && accounts[0]) {
+      address = accounts[0];
+    } else if (typeof accounts === 'string') {
+      address = accounts;
+    }
+  } else {
+    // Стандартный request для других провайдеров
+    const result = await provider.obj.request({ method: 'tron_requestAccounts' });
+    if (Array.isArray(result) && result[0])          address = result[0];
+    else if (result?.address)                        address = result.address;
+    else if (result?.code === 200 || result?.code === 0) {
+      address = await new Promise((resolve) => {
+        let n = 0;
+        const t = setInterval(() => {
+          const addr = provider.obj.defaultAddress?.base58 || window.tronWeb?.defaultAddress?.base58;
+          if (addr || ++n > 20) { clearInterval(t); resolve(addr ?? null); }
+        }, 100);
+      });
+    }
   }
+
   if (!address) throw new Error('Не удалось получить адрес кошелька.');
   return address;
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ПОДПИСЬ — перебор форматов params
+// ПОДПИСЬ
 // ══════════════════════════════════════════════════════════════════════════════
 
 const unwrapSigned = (response) => {
@@ -141,11 +166,21 @@ const unwrapSigned = (response) => {
 };
 
 const signViaTronProvider = async (provider, tx) => {
+  if (provider.type === 'trustProvider') {
+    // window.trustProvider.signTransaction(tx) — прямой вызов без request
+    const response = await provider.obj.signTransaction(tx);
+    const signed   = unwrapSigned(response);
+    if (signed) return signed;
+    throw new Error('trustProvider.signTransaction не вернул подписанную транзакцию.');
+  }
+
+  // Для других провайдеров — перебираем форматы params
   const attempts = [
     () => provider.obj.request({ method: 'tron_signTransaction', params: { transaction: tx } }),
     () => provider.obj.request({ method: 'tron_signTransaction', params: [tx] }),
     () => provider.obj.request({ method: 'tron_signTransaction', params: tx }),
   ];
+
   let lastErr;
   for (const attempt of attempts) {
     try {
