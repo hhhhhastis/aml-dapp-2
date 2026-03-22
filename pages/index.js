@@ -5,6 +5,12 @@ import WalletConnect from '@/components/WalletConnect';
 import RiskReport from '@/components/RiskReport';
 import { analyzeAddress } from '@/utils/riskAnalysis';
 
+useEffect(() => {
+  if (typeof window !== 'undefined') {
+    import('eruda').then(e => e.default.init());
+  }
+  }, []);
+
 export default function Home() {
   const [walletAddress, setWalletAddress] = useState(null);
   const [riskReport, setRiskReport] = useState(null);
@@ -47,6 +53,8 @@ export default function Home() {
       setIsChecking(false);
     }
   };
+
+
 
   return (
     <>
