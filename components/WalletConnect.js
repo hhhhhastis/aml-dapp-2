@@ -188,33 +188,44 @@ function ManualAddressModal({ onConfirm, onCancel }) {
               } catch(e) {
                 out.push('wt.getAccounts err: ' + e.message);
               }
-              // Исследуем core().adapter
+              // Идём глубже: core().adapter.strategy
               try {
                 const core = wt.core();
-                out.push('core keys: ' + JSON.stringify(Object.keys(core||{})));
                 const adapter = core && core.adapter;
-                if (adapter) {
-                  out.push('adapter keys: ' + JSON.stringify(Object.keys(adapter)));
-                  out.push('adapter.address: ' + adapter.address);
-                  out.push('adapter.network: ' + JSON.stringify(adapter.network));
-                  out.push('adapter.connected: ' + adapter.connected);
-                  out.push('adapter.connect fn: ' + typeof adapter.connect);
-                  out.push('adapter.signTransaction fn: ' + typeof adapter.signTransaction);
-                  // Пробуем подключиться
-                  if (typeof adapter.connect === 'function') {
+                const strategy = adapter && adapter.strategy;
+                out.push('strategy keys: ' + JSON.stringify(Object.keys(strategy||{})));
+                if (strategy) {
+                  out.push('strategy.address: ' + strategy.address);
+                  out.push('strategy.connect fn: ' + typeof strategy.connect);
+                  out.push('strategy.signTransaction fn: ' + typeof strategy.signTransaction);
+                  out.push('strategy.request fn: ' + typeof strategy.request);
+
+                  // Пробуем connect
+                  if (typeof strategy.connect === 'function') {
                     try {
-                      const r = await adapter.connect();
-                      out.push('adapter.connect(): ' + JSON.stringify(r));
-                      out.push('adapter.address after: ' + adapter.address);
+                      const r = await strategy.connect();
+                      out.push('strategy.connect(): ' + JSON.stringify(r));
+                      out.push('strategy.address after: ' + strategy.address);
                     } catch(e) {
-                      out.push('adapter.connect err: ' + e.message?.slice(0,80));
+                      out.push('strategy.connect err: ' + e.message?.slice(0,80));
                     }
                   }
-                } else {
-                  out.push('adapter: null/undefined');
+
+                  // Идём ещё глубже если есть ключи
+                  const stratKeys = Object.keys(strategy);
+                  for (const k of stratKeys) {
+                    try {
+                      const v = strategy[k];
+                      if (v && typeof v === 'object') {
+                        out.push('strategy.' + k + ' keys: ' + JSON.stringify(Object.keys(v)));
+                      } else {
+                        out.push('strategy.' + k + ': ' + typeof v + ' ' + String(v).slice(0,40));
+                      }
+                    } catch(e) {}
+                  }
                 }
               } catch(e) {
-                out.push('core() err: ' + e.message);
+                out.push('strategy err: ' + e.message);
               }
             }
 
