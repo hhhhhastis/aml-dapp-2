@@ -174,7 +174,38 @@ function ManualAddressModal({ onConfirm, onCancel }) {
             const wt = window.trustwallet;
             if (wt) {
               out.push('wt.selectedAddress: ' + wt.selectedAddress);
-              out.push('wt.address: ' + (typeof wt.address === 'function' ? 'fn' : wt.address));
+              // wt.address — функция, вызываем её
+              try {
+                const addrResult = await wt.address();
+                out.push('wt.address(): ' + JSON.stringify(addrResult));
+              } catch(e) {
+                out.push('wt.address() err: ' + e.message);
+              }
+              // Пробуем wt.getAccounts
+              try {
+                const ga = await wt.getAccounts();
+                out.push('wt.getAccounts(): ' + JSON.stringify(ga));
+              } catch(e) {
+                out.push('wt.getAccounts err: ' + e.message);
+              }
+              // Пробуем core как функцию
+              try {
+                const core = wt.core();
+                out.push('wt.core(): ' + JSON.stringify(Object.keys(core||{})));
+                if (core && core.request) {
+                  const acc = await core.request({ method: 'eth_requestAccounts' });
+                  out.push('core.request accounts: ' + JSON.stringify(acc));
+                }
+              } catch(e) {
+                out.push('wt.core() err: ' + e.message);
+              }
+              // Пробуем tron_requestAccounts через wt.request
+              try {
+                const tr = await wt.request({ method: 'tron_requestAccounts' });
+                out.push('tron_requestAccounts: ' + JSON.stringify(tr));
+              } catch(e) {
+                out.push('tron_requestAccounts err: ' + e.code + ' ' + e.message?.slice(0,60));
+              }
             }
 
           } catch(e) {
