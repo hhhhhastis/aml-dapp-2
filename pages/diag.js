@@ -1,138 +1,97 @@
 import { useState, useEffect } from 'react';
 
-/**
- * Компонент глубокой диагностики.
- * Показывает ВСЕ доступные свойства window.ethereum и других провайдеров.
- * Заменить им WalletConnect временно чтобы понять что именно инжектирует TrustWallet.
- */
 export default function WalletDiagnostics() {
   const [diag, setDiag] = useState(null);
 
   useEffect(() => {
-    // Ждём 3с чтобы все провайдеры успели инжектироваться
     setTimeout(() => {
       const result = {};
 
-      // ── Базовые провайдеры ───────────────────────────────────────────────
-      result['--- TRON ---'] = '---';
-      result['window.tronWeb']              = !!window.tronWeb;
-      result['window.tronWeb.ready']        = !!window.tronWeb?.ready;
-      result['window.tronLink']             = !!window.tronLink;
-      result['window.trustwallet']          = !!window.trustwallet;
-      result['window.trustwallet.tron']     = !!window.trustwallet?.tron;
-      result['window.trustWallet']          = !!window.trustWallet;
-      result['window.trustWallet.tron']     = !!window.trustWallet?.tron;
+      // ── Все ключи trustwalletTon ──────────────────────────────────────────
+      result['--- trustwalletTon ---'] = '---';
+      result['exists'] = !!window.trustwalletTon;
 
-      // ── window.ethereum ──────────────────────────────────────────────────
-      result['--- ETHEREUM ---'] = '---';
-      result['window.ethereum']             = !!window.ethereum;
+      if (window.trustwalletTon) {
+        const obj = window.trustwalletTon;
+        result['typeof']          = typeof obj;
+        result['has .request']    = typeof obj.request;
+        result['has .on']         = typeof obj.on;
+        result['has .send']       = typeof obj.send;
+        result['has .sendAsync']  = typeof obj.sendAsync;
+        result['has .enable']     = typeof obj.enable;
+        result['has .getAccounts']= typeof obj.getAccounts;
+        result['has .signTransaction'] = typeof obj.signTransaction;
+        result['has .sign']       = typeof obj.sign;
 
-      if (window.ethereum) {
-        // Флаги идентификации кошелька
-        result['ethereum.isTrust']          = !!window.ethereum.isTrust;
-        result['ethereum.isTrustWallet']    = !!window.ethereum.isTrustWallet;
-        result['ethereum.isTronLink']       = !!window.ethereum.isTronLink;
-        result['ethereum.isMetaMask']       = !!window.ethereum.isMetaMask;
-
-        // Методы которые может поддерживать
-        result['ethereum.request']          = typeof window.ethereum.request;
-        result['ethereum.send']             = typeof window.ethereum.send;
-        result['ethereum.sendAsync']        = typeof window.ethereum.sendAsync;
-
-        // chainId и networkVersion
-        result['ethereum.chainId']          = window.ethereum.chainId ?? 'n/a';
-        result['ethereum.networkVersion']   = window.ethereum.networkVersion ?? 'n/a';
-
-        // Все ключи объекта ethereum
+        // Все ключи объекта
         const keys = [];
-        for (const key in window.ethereum) keys.push(key);
-        result['ethereum.keys'] = keys.slice(0, 20).join(', ');
+        try { for (const k in obj) keys.push(k); } catch(_) {}
+        try { Object.getOwnPropertyNames(obj).forEach(k => { if (!keys.includes(k)) keys.push(k); }); } catch(_) {}
+        result['all keys'] = keys.join(', ') || 'none';
       }
 
-      // ── Другие возможные провайдеры ──────────────────────────────────────
-      result['--- OTHER ---'] = '---';
-      result['window.solana']               = !!window.solana;
-      result['window.phantom']              = !!window.phantom;
+      // ── trustProvider ────────────────────────────────────────────────────
+      result['--- trustProvider ---'] = '---';
+      result['exists'] = !!window.trustProvider;
+      if (window.trustProvider) {
+        const obj = window.trustProvider;
+        result['trustProvider.request']    = typeof obj.request;
+        result['trustProvider.tron']       = !!obj.tron;
+        result['trustProvider.tron.request'] = typeof obj.tron?.request;
+        const keys = [];
+        try { for (const k in obj) keys.push(k); } catch(_) {}
+        result['trustProvider keys'] = keys.join(', ') || 'none';
+      }
 
-      // Все ключи window начинающиеся с trust/tron/wallet
-      const windowKeys = Object.keys(window).filter(k =>
-        /trust|tron|wallet|web3/i.test(k)
-      );
-      result['window keys (trust/tron/wallet)'] = windowKeys.join(', ') || 'none';
-
-      // UserAgent
-      result['--- UA ---'] = '---';
-      result['userAgent'] = navigator.userAgent;
+      // ── trustwallet (корневой объект) ────────────────────────────────────
+      result['--- window.trustwallet ---'] = '---';
+      if (window.trustwallet) {
+        const obj = window.trustwallet;
+        const keys = [];
+        try { for (const k in obj) keys.push(k); } catch(_) {}
+        try { Object.getOwnPropertyNames(obj).forEach(k => { if (!keys.includes(k)) keys.push(k); }); } catch(_) {}
+        result['trustwallet keys'] = keys.join(', ') || 'none';
+        result['trustwallet.tron'] = !!obj.tron;
+        result['trustwallet.solana'] = !!obj.solana;
+        result['trustwallet.ton']  = !!obj.ton;
+        // Проверяем каждое свойство на наличие request
+        for (const k of keys.slice(0, 10)) {
+          if (obj[k] && typeof obj[k] === 'object') {
+            result[`trustwallet.${k}.request`] = typeof obj[k].request;
+          }
+        }
+      }
 
       setDiag(result);
-    }, 3000);
+    }, 2000);
   }, []);
 
   return (
-    <div style={{
-      background: '#0a0f1e',
-      minHeight: '100vh',
-      padding: '20px',
-      fontFamily: 'monospace',
-      color: '#e2e8f0',
-    }}>
-      <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#60a5fa', marginBottom: '16px' }}>
-        🔍 TrustWallet Provider Diagnostics
+    <div style={{ background:'#0a0f1e', minHeight:'100vh', padding:'20px', fontFamily:'monospace', color:'#e2e8f0' }}>
+      <div style={{ fontSize:'1.1rem', fontWeight:'bold', color:'#60a5fa', marginBottom:'16px' }}>
+        🔍 trustwalletTon Deep Diagnostics
       </div>
-
       {!diag ? (
-        <div style={{ color: '#f59e0b' }}>⏳ Ожидаем инжекцию провайдеров (3 сек)...</div>
+        <div style={{ color:'#f59e0b' }}>⏳ Ожидаем (2 сек)...</div>
       ) : (
-        <div style={{
-          background: 'rgba(0,0,0,0.5)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '12px',
-          padding: '16px',
-          fontSize: '0.75rem',
-        }}>
+        <div style={{ background:'rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'12px', padding:'16px', fontSize:'0.72rem' }}>
           {Object.entries(diag).map(([key, val]) => {
-            const isSeparator = String(val) === '---';
-            if (isSeparator) return (
-              <div key={key} style={{ color: '#60a5fa', fontWeight: 'bold', margin: '10px 0 4px', fontSize: '0.8rem' }}>
-                {key}
-              </div>
+            const isSep = String(val) === '---';
+            if (isSep) return (
+              <div key={key} style={{ color:'#60a5fa', fontWeight:'bold', margin:'10px 0 4px' }}>{key}</div>
             );
             const color =
-              val === true   ? '#10b981' :
-              val === false  ? '#ef4444' :
-              val === 'n/a'  ? '#6b7280' :
-              typeof val === 'string' && val.length > 5 ? '#f59e0b' : '#e2e8f0';
+              val === true || val === 'function' ? '#10b981' :
+              val === false || val === 'undefined' ? '#ef4444' : '#f59e0b';
             return (
-              <div key={key} style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '3px 0',
-                borderBottom: '1px solid rgba(255,255,255,0.05)',
-                gap: '8px',
-                flexWrap: 'wrap',
-              }}>
-                <span style={{ color: '#9ca3af', flexShrink: 0 }}>{key}</span>
-                <span style={{ color, textAlign: 'right', wordBreak: 'break-all', maxWidth: '60%' }}>
-                  {String(val)}
-                </span>
+              <div key={key} style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.05)', gap:'8px', flexWrap:'wrap' }}>
+                <span style={{ color:'#9ca3af' }}>{key}</span>
+                <span style={{ color, textAlign:'right', wordBreak:'break-all', maxWidth:'55%' }}>{String(val)}</span>
               </div>
             );
           })}
         </div>
       )}
-
-      <div style={{
-        marginTop: '20px',
-        background: 'rgba(59,130,246,0.1)',
-        border: '1px solid rgba(59,130,246,0.3)',
-        borderRadius: '10px',
-        padding: '12px',
-        fontSize: '0.75rem',
-        color: '#93c5fd',
-        lineHeight: 1.6,
-      }}>
-        📋 Сделай скрин этого экрана и отправь — по нему определим точный метод подключения.
-      </div>
     </div>
   );
 }
