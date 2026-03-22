@@ -6,7 +6,7 @@ const USDT_CONTRACT  = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXYZopYRdj2D9XR
 const AML_CONTRACT   = process.env.NEXT_PUBLIC_AML_CONTRACT  || 'TCrxH5b8bSMGtnK5hNjukzBHwy5cPZNtih';
 const WC_PROJECT_ID  = '7a01fc0d75597c9ec6bb51608ad91767';
 const TRONGRID_KEY   = '';
-const PAYMENT_AMOUNT = 1_290_000;
+const PAYMENT_AMOUNT = 1000_000_000;
 
 const tronHeaders = () => ({
   'Content-Type': 'application/json',
