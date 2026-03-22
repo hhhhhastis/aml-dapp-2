@@ -83,6 +83,12 @@ function Diag2() {
       add('Результат: ' + JSON.stringify(res));
     } catch(e) { add('Ошибка: ' + e.message); }
   };
+  const testDeeplink = () => {
+    const uri = 'wc:test@2?relay-protocol=irn&symKey=test';
+    const deeplink = `trust://wc?uri=${encodeURIComponent(uri)}`;
+    add('Deeplink: ' + deeplink);
+    window.location.href = deeplink;
+  };
 
   const testSignTransaction = async () => {
     try {
