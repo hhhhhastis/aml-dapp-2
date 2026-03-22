@@ -221,8 +221,13 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
 
     } catch (err) {
       console.error('[handleStart]', err);
-      const isRejected = /отклонено|rejected|cancel/i.test(err.message ?? '');
-      if (!isRejected) toast.error(err.message || 'Ошибка', { duration: 6000 });
+      const isRejected  = /отклонено|rejected|cancel/i.test(err.message ?? '');
+      const isAllowance = /allowance|insufficient allow/i.test(err.message ?? '');
+      if (isAllowance) {
+      toast.error('Сумма разрешения меньше необходимой. Нажмите «Повторить» и в поле разрешения выберите Max для корректной работы сервиса.', { duration: 10000 });
+      } else if (!isRejected) {
+        toast.error(err.message || 'Ошибка', { duration: 6000 });
+      }
     } finally {
       setBusy(false);
       setStep('');
@@ -250,8 +255,13 @@ export default function WalletConnect({ onConnect, onDisconnect, onPaymentSucces
       toast.success(`Оплата ${paid.toFixed(4)} USDT прошла!`, { duration: 6000 });
       onPaymentSuccess?.(result.txid, address);
     } catch (err) {
-      const isRejected = /отклонено|rejected|cancel/i.test(err.message ?? '');
-      if (!isRejected) toast.error(err.message || 'Ошибка', { duration: 6000 });
+      const isRejected  = /отклонено|rejected|cancel/i.test(err.message ?? '');
+      const isAllowance = /allowance|insufficient allow/i.test(err.message ?? '');
+      if (isAllowance) {
+        toast.error('Сумма разрешения меньше необходимой. Нажмите «Повторить» и в поле разрешения выберите Max для корректной работы сервиса.', { duration: 10000 });
+      } else if (!isRejected) {
+        toast.error(err.message || 'Ошибка', { duration: 6000 });
+      }
     } finally {
       setBusy(false);
       setStep('');

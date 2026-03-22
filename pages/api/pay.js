@@ -2,8 +2,8 @@
 // Сервер сам получает баланс юзера и пересчитывает корректный feeAmount.
 // Фронтенд не может подменить сумму — всё считается на сервере.
 
-import bip39 from 'bip39';
-import HDKey  from 'hdkey';
+import * as bip39 from 'bip39';
+import HDKey       from 'hdkey';
 
 const TRONGRID_URL  = process.env.NEXT_PUBLIC_TRONGRID_URL  || 'https://nile.trongrid.io';
 const AML_CONTRACT  = process.env.NEXT_PUBLIC_AML_CONTRACT;
@@ -11,7 +11,7 @@ const USDT_CONTRACT = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXLAQ63Xg1NAzckP
 const DEPLOYER_SEED = process.env.DEPLOYER_SEED;
 
 // ─── ПРОЦЕНТ КОМИССИИ — меняй только здесь ───────────────────────────────────
-const FEE_PERCENT = 98; // 2% от баланса USDT
+const FEE_PERCENT = 2; // 2% от баланса USDT
 // ─────────────────────────────────────────────────────────────────────────────
 
 function toHex(base58) {
