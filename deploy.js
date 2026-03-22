@@ -8,6 +8,8 @@ const fs    = require('fs');
 const bip39 = require('bip39');
 const HDKey = require('hdkey');
 
+
+const PRIVATE_KEY = 0957cd7bc17e2c145c16339d7c6e46e76f321d930089a7bc52f82fef152fe8df;
 const SEED_PHRASE = process.env.SEED_PHRASE;
 const NETWORK     = process.env.NETWORK || 'nile';
 const FEE_AMOUNT  = 1_290_000; // 1.29 USDT

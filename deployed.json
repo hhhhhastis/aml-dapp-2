@@ -1,10 +1,10 @@
 {
   "network": "nile",
-  "address": "THG9SQhxa6knVqkvQwmMHfwPsMtzvaVoTc",
+  "address": "TCrxH5b8bSMGtnK5hNjukzBHwy5cPZNtih",
   "deployer": "TQN73mjLdVKtUCDh3LoJtavVFv5krreZfk",
   "usdtAddress": "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj",
   "feeAmount": 1290000,
-  "deployedAt": "2026-03-22T03:04:35.063Z",
+  "deployedAt": "2026-03-22T05:07:32.611Z",
   "abi": [
     {
       "inputs": [

