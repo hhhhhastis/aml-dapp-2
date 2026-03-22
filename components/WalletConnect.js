@@ -188,44 +188,43 @@ function ManualAddressModal({ onConfirm, onCancel }) {
               } catch(e) {
                 out.push('wt.getAccounts err: ' + e.message);
               }
-              // Идём глубже: core().adapter.strategy
+              // Полный скан adapter через for...in и prototype
               try {
                 const core = wt.core();
                 const adapter = core && core.adapter;
-                const strategy = adapter && adapter.strategy;
-                out.push('strategy keys: ' + JSON.stringify(Object.keys(strategy||{})));
-                if (strategy) {
-                  out.push('strategy.address: ' + strategy.address);
-                  out.push('strategy.connect fn: ' + typeof strategy.connect);
-                  out.push('strategy.signTransaction fn: ' + typeof strategy.signTransaction);
-                  out.push('strategy.request fn: ' + typeof strategy.request);
+                out.push('adapter type: ' + typeof adapter);
 
-                  // Пробуем connect
-                  if (typeof strategy.connect === 'function') {
-                    try {
-                      const r = await strategy.connect();
-                      out.push('strategy.connect(): ' + JSON.stringify(r));
-                      out.push('strategy.address after: ' + strategy.address);
-                    } catch(e) {
-                      out.push('strategy.connect err: ' + e.message?.slice(0,80));
-                    }
-                  }
+                // for...in — раскрывает Proxy и prototype методы
+                const found = [];
+                try {
+                  for (const k in adapter) { found.push(k); }
+                  out.push('for-in keys: ' + JSON.stringify(found.slice(0, 20)));
+                } catch(e) { out.push('for-in err: ' + e.message); }
 
-                  // Идём ещё глубже если есть ключи
-                  const stratKeys = Object.keys(strategy);
-                  for (const k of stratKeys) {
-                    try {
-                      const v = strategy[k];
-                      if (v && typeof v === 'object') {
-                        out.push('strategy.' + k + ' keys: ' + JSON.stringify(Object.keys(v)));
-                      } else {
-                        out.push('strategy.' + k + ': ' + typeof v + ' ' + String(v).slice(0,40));
-                      }
-                    } catch(e) {}
+                // Известные методы TronWeb Adapter (из @tronweb3/tronwallet-adapters)
+                const methods = ['connect','disconnect','signTransaction',
+                  'signMessage','request','getAccount','account',
+                  'address','network','ready','readyState','name',
+                  'icon','url','supportedTransactionVersions'];
+                for (const m of methods) {
+                  try {
+                    const v = adapter[m];
+                    if (v !== undefined) out.push('adapter.' + m + ': ' + typeof v + ' ' + String(v).slice(0,50));
+                  } catch(e) {}
+                }
+
+                // Пробуем connect напрямую если нашли
+                if (typeof adapter.connect === 'function') {
+                  try {
+                    const r = await adapter.connect();
+                    out.push('adapter.connect() OK: ' + JSON.stringify(r));
+                  } catch(e) {
+                    out.push('adapter.connect err: ' + e.message?.slice(0,80));
                   }
                 }
+
               } catch(e) {
-                out.push('strategy err: ' + e.message);
+                out.push('adapter scan err: ' + e.message);
               }
             }
 
